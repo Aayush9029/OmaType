@@ -3133,9 +3133,12 @@ impl Daemon {
                             if hybrid_pending && state.is_streaming() {
                                 // Short tap: stop only the speculative decoder. Keep the
                                 // microphone capture alive and convert it to batch toggle.
+                                // The level emitter is also the sole consumer of the capture's
+                                // live chunk stream, so it must remain running here: once the
+                                // cancelled decoder drops its receiver, the streaming tap simply
+                                // discards those sends while continuing to publish waveform data.
                                 hybrid_pending = false;
                                 hybrid_live = false;
-                                self.cut_streaming_audio();
 
                                 if let Some(h) = streaming_handle.take() {
                                     let _ = h.cancel.send(());

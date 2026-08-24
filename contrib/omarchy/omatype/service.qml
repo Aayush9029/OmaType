@@ -13,6 +13,9 @@ Item {
   property real peak: 0
   property bool voiceActive: false
   property double startedAt: 0
+  property int elapsedSeconds: 0
+  property double lastVisualSampleMs: -1
+  property real pendingVisualPeak: 0
 
   readonly property bool active: daemonState === "recording"
     || daemonState === "streaming"
@@ -23,10 +26,6 @@ Item {
   readonly property string stateLabel: daemonState === "streaming"
     ? "LIVE DICTATION"
     : (daemonState === "transcribing" ? "POLISHING" : "LISTENING")
-  readonly property int elapsedSeconds: startedAt > 0
-    ? Math.max(0, Math.floor((Date.now() - startedAt) / 1000))
-    : 0
-
   function updateState(raw) {
     try {
       const data = JSON.parse(String(raw || "{}"))
@@ -35,9 +34,15 @@ Item {
         if ((next === "recording" || next === "streaming")
             && daemonState !== "recording" && daemonState !== "streaming") {
           startedAt = Date.now()
+          elapsedSeconds = 0
+          lastVisualSampleMs = -1
+          pendingVisualPeak = 0
           samples = []
         } else if (next === "idle" || next === "stopped") {
           startedAt = 0
+          elapsedSeconds = 0
+          lastVisualSampleMs = -1
+          pendingVisualPeak = 0
           samples = []
           peak = 0
           voiceActive = false
@@ -55,10 +60,20 @@ Item {
     try {
       const data = JSON.parse(line)
       if (typeof data.peak !== "number") return
-      peak = Math.max(0, Math.min(1, Number(data.peak)))
+      const nextPeak = Math.max(0, Math.min(1, Number(data.peak)))
+      const sampleMs = Number(data.ts_ms || 0)
+      peak = nextPeak
       voiceActive = !!data.vad
+      pendingVisualPeak = Math.max(pendingVisualPeak, nextPeak)
+
+      // The daemon publishes at 100 Hz, which makes a 46-bar history race
+      // across the screen in under half a second. Keep the audio path at full
+      // fidelity while sampling the visualizer at ~25 FPS instead.
+      if (lastVisualSampleMs >= 0 && sampleMs - lastVisualSampleMs < 40) return
+      lastVisualSampleMs = sampleMs
       const next = samples.slice()
-      next.push(peak)
+      next.push(pendingVisualPeak)
+      pendingVisualPeak = 0
       while (next.length > 46) next.shift()
       samples = next
       wave.requestPaint()
@@ -87,7 +102,11 @@ Item {
     interval: 1000
     running: root.active
     repeat: true
-    onTriggered: elapsedText.text = root.formatElapsed(root.elapsedSeconds)
+    onTriggered: {
+      root.elapsedSeconds = root.startedAt > 0
+        ? Math.max(0, Math.floor((Date.now() - root.startedAt) / 1000))
+        : 0
+    }
   }
 
   function formatElapsed(value) {

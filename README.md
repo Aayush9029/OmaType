@@ -12,7 +12,8 @@
 <p align="center">
   <img src="assets/omatype-panel.png" width="390" alt="OmaType transcript history panel for Omarchy">
   <br>
-  <img src="assets/omatype-waveform.png" width="460" alt="OmaType floating live dictation waveform">
+  <img src="assets/omatype-waveform.png" width="390" alt="OmaType floating live dictation waveform">
+  <img src="assets/omatype-recording-bar.png" width="390" alt="OmaType batch recording bar with elapsed time and waveform">
 </p>
 
 OmaType is an Omarchy-focused fork of [Voxtype](https://github.com/peteonrails/voxtype). It keeps one lightweight Parakeet model warm and gives the Home key two jobs:
