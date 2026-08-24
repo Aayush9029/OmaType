@@ -153,6 +153,24 @@ Panel {
     return String(value || "").replace(/[\r\n]+/g, " ").trim()
   }
 
+  function revealSelectedEntry() {
+    if (!historyList.visible || root.historyEntries.length === 0) return
+    var entry = historyRepeater.itemAt(root.selectedEntry)
+    if (!entry) return
+
+    var viewportTop = historyList.contentY
+    var viewportBottom = viewportTop + historyList.height
+    var entryTop = entry.y
+    var entryBottom = entryTop + entry.height
+    var nextY = viewportTop
+
+    if (entryTop < viewportTop) nextY = entryTop
+    else if (entryBottom > viewportBottom) nextY = entryBottom - historyList.height
+
+    var maxY = Math.max(0, historyList.contentHeight - historyList.height)
+    historyList.contentY = Math.max(0, Math.min(nextY, maxY))
+  }
+
   visible: true
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
@@ -169,7 +187,10 @@ Panel {
     showingModels = false
     refreshStatus()
     refreshHistory()
-    Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+    Qt.callLater(function() {
+      historyList.contentY = 0
+      keyCatcher.forceActiveFocus()
+    })
   }
 
   Timer {
@@ -317,6 +338,7 @@ Panel {
         if (root.historyEntries.length === 0 || dy === 0) return
         root.cursorActive = true
         root.selectedEntry = Math.max(0, Math.min(root.historyEntries.length - 1, root.selectedEntry + dy))
+        Qt.callLater(function() { root.revealSelectedEntry() })
       }
       onActivateRequested: if (!root.showingModels && root.historyEntries.length > 0) root.copyEntry(root.historyEntries[root.selectedEntry])
       onCloseRequested: root.close()
@@ -449,6 +471,7 @@ Panel {
         }
 
         Flickable {
+          id: historyList
           visible: !root.showingModels && root.historyEntries.length > 0
           width: parent.width
           height: Math.min(historyColumn.implicitHeight, Style.space(330))
@@ -462,6 +485,7 @@ Panel {
             spacing: Style.space(6)
 
             Repeater {
+              id: historyRepeater
               model: root.historyEntries
               delegate: Rectangle {
                 id: transcriptRow

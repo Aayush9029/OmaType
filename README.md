@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/icon.png" width="128" alt="OmaType">
+  <img src="assets/icon.png" width="64" alt="OmaType">
   <h1 align="center">OmaType</h1>
   <p align="center">Fast local voice typing with tap-for-accuracy and hold-for-live dictation</p>
 </p>
