@@ -14,6 +14,8 @@
   <br>
   <img src="assets/omatype-waveform.png" width="390" alt="OmaType floating live dictation waveform">
   <img src="assets/omatype-recording-bar.png" width="390" alt="OmaType batch recording bar with elapsed time and waveform">
+  <br>
+  <img src="assets/omatype-processing-bar.png" width="390" alt="OmaType animated processing helix">
 </p>
 
 OmaType is an Omarchy-focused fork of [Voxtype](https://github.com/peteonrails/voxtype). It keeps one lightweight Parakeet model warm and gives the Home key two jobs:
@@ -30,7 +32,7 @@ Audio capture begins on the first key-down, so changing from tap to hold never d
 | Tap once, then tap again | Records quietly, processes the complete buffer for better accuracy, then types it at your cursor. |
 | Hold for 2 seconds | Starts real-time dictation at your cursor; release Home to stop. |
 
-While OmaType is listening, a compact floating waveform stays above the bottom edge of the screen. It shows the live microphone level, recording mode, and elapsed time without requiring the bar menu to remain open.
+While OmaType is listening, a compact floating waveform stays above the bottom edge of the screen. It shows the live microphone level, recording mode, and elapsed time without requiring the bar menu to remain open. During transcription, the waveform becomes an animated processing helix instead of freezing in place.
 
 ## Install
 

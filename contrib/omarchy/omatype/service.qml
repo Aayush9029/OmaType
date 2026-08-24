@@ -16,6 +16,7 @@ Item {
   property int elapsedSeconds: 0
   property double lastVisualSampleMs: -1
   property real pendingVisualPeak: 0
+  property real processingPhase: 0
 
   readonly property bool active: daemonState === "recording"
     || daemonState === "streaming"
@@ -113,6 +114,16 @@ Item {
     return Math.floor(value / 60) + ":" + String(value % 60).padStart(2, "0")
   }
 
+  NumberAnimation on processingPhase {
+    from: 0
+    to: Math.PI * 2
+    duration: 1500
+    loops: Animation.Infinite
+    running: root.daemonState === "transcribing"
+  }
+
+  onProcessingPhaseChanged: wave.requestPaint()
+
   PanelWindow {
     id: window
     visible: root.active
@@ -195,6 +206,45 @@ Item {
             const ctx = getContext("2d")
             ctx.clearRect(0, 0, width, height)
             const center = height / 2
+            if (root.daemonState === "transcribing") {
+              const points = 34
+              const step = width / (points - 1)
+              const amplitude = center - 5
+
+              // Draw alternating rungs first so the two moving strands sit
+              // crisply on top, like the processing helix in Petal.
+              ctx.lineCap = "round"
+              ctx.lineWidth = 1.5
+              for (let i = 0; i < points; i += 2) {
+                const angle = i * 0.52 + root.processingPhase
+                const y1 = center + Math.sin(angle) * amplitude
+                const y2 = center - Math.sin(angle) * amplitude
+                const depth = 0.18 + Math.abs(Math.cos(angle)) * 0.42
+                ctx.strokeStyle = Util.alpha(root.stateColor, depth)
+                ctx.beginPath()
+                ctx.moveTo(i * step, y1)
+                ctx.lineTo(i * step, y2)
+                ctx.stroke()
+              }
+
+              for (let strand = -1; strand <= 1; strand += 2) {
+                ctx.strokeStyle = strand < 0
+                  ? Util.alpha(root.stateColor, 0.52)
+                  : root.stateColor
+                ctx.lineWidth = strand < 0 ? 2 : 2.5
+                ctx.beginPath()
+                for (let i = 0; i < points; i++) {
+                  const angle = i * 0.52 + root.processingPhase
+                  const x = i * step
+                  const y = center + strand * Math.sin(angle) * amplitude
+                  if (i === 0) ctx.moveTo(x, y)
+                  else ctx.lineTo(x, y)
+                }
+                ctx.stroke()
+              }
+              return
+            }
+
             const values = root.samples
             const count = 46
             const gap = 2
