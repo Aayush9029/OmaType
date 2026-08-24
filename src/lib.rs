@@ -76,6 +76,7 @@ pub mod cpu;
 pub mod daemon;
 pub mod eager;
 pub mod error;
+pub mod history;
 #[cfg(target_os = "linux")]
 pub mod hotkey;
 #[cfg(target_os = "macos")]
@@ -95,8 +96,8 @@ pub mod tui;
 pub mod vad;
 
 pub use cli::{
-    Cli, Commands, CompositorType, ConfigAction, ConfigSetKey, InfoAction, MeetingAction,
-    OutputModeOverride, RecordAction, SetupAction,
+    Cli, Commands, CompositorType, ConfigAction, ConfigSetKey, HistoryAction, InfoAction,
+    MeetingAction, OutputModeOverride, RecordAction, SetupAction,
 };
 pub use config::Config;
 pub use daemon::Daemon;

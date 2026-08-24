@@ -10,8 +10,9 @@ use tracing_subscriber::EnvFilter;
 #[cfg(target_os = "macos")]
 use voxtype::menubar;
 use voxtype::{
-    config, config_set, cpu, daemon, meeting, setup, transcribe, vad, Cli, Commands, ConfigAction,
-    ConfigSetKey, InfoAction, MeetingAction, RecordAction, SetupAction,
+    config, config_set, cpu, daemon, history, meeting, setup, transcribe, vad, Cli, Commands,
+    ConfigAction, ConfigSetKey, HistoryAction, InfoAction, MeetingAction, RecordAction,
+    SetupAction,
 };
 
 /// Parse a comma-separated list of driver names into OutputDriver vec
@@ -725,6 +726,10 @@ async fn main() -> anyhow::Result<()> {
 
         Commands::Record { action } => {
             send_record_command(&config, action, top_level_model.as_deref())?;
+        }
+
+        Commands::History { action } => {
+            run_history_command(action)?;
         }
 
         Commands::Meeting { action } => {
@@ -1526,7 +1531,75 @@ fn format_state_json(
     }
 }
 
-/// Dispatch `voxtype info <subcommand>`.
+/// Dispatch `voxtype history <subcommand>`.
+fn run_history_command(action: HistoryAction) -> anyhow::Result<()> {
+    match action {
+        HistoryAction::List { limit, json } => {
+            let entries = history::list(limit)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&entries)?);
+            } else if entries.is_empty() {
+                println!("No transcripts yet.");
+            } else {
+                for entry in entries {
+                    let preview = entry.text.replace(['\n', '\r'], " ");
+                    println!(
+                        "{}  {}  {:>5.1}s  {}",
+                        &entry.id[..8.min(entry.id.len())],
+                        entry.timestamp,
+                        entry.duration_secs,
+                        preview
+                    );
+                }
+            }
+        }
+        HistoryAction::Copy { id } => {
+            let entry = history::find(&id)?
+                .ok_or_else(|| anyhow::anyhow!("Transcript '{}' was not found", id))?;
+            copy_text_to_clipboard(&entry.text)?;
+            println!("Copied transcript {}", entry.id);
+        }
+        HistoryAction::Delete { id } => {
+            if !history::delete(&id)? {
+                anyhow::bail!("Transcript '{}' was not found", id);
+            }
+            println!("Deleted transcript {}", id);
+        }
+        HistoryAction::Clear { force } => {
+            if !force {
+                anyhow::bail!("Refusing to clear history without --force");
+            }
+            history::clear()?;
+            println!("Cleared transcript history");
+        }
+    }
+    Ok(())
+}
+
+fn copy_text_to_clipboard(text: &str) -> anyhow::Result<()> {
+    #[cfg(target_os = "macos")]
+    let mut child = std::process::Command::new("pbcopy")
+        .stdin(std::process::Stdio::piped())
+        .spawn()?;
+
+    #[cfg(not(target_os = "macos"))]
+    let mut child = std::process::Command::new("wl-copy")
+        .stdin(std::process::Stdio::piped())
+        .spawn()?;
+
+    use std::io::Write;
+    child
+        .stdin
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("Clipboard process did not open stdin"))?
+        .write_all(text.as_bytes())?;
+    let status = child.wait()?;
+    if !status.success() {
+        anyhow::bail!("Clipboard command exited with {}", status);
+    }
+    Ok(())
+}
+
 fn run_info_command(action: InfoAction) -> anyhow::Result<()> {
     match action {
         InfoAction::Variants { json } => {

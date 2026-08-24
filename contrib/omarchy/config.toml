@@ -1,0 +1,55 @@
+state_file = "auto"
+engine = "parakeet"
+
+[hotkey]
+enabled = true
+key = "F13"
+mode = "hybrid"
+hybrid_hold_secs = 2.0
+cancel_key = "DELETE"
+
+[audio]
+device = "default"
+sample_rate = 16000
+max_duration_secs = 1800
+pause_media = true
+
+[output]
+mode = "type"
+fallback_to_clipboard = true
+type_delay_ms = 0
+pre_type_delay_ms = 0
+auto_submit = false
+shift_enter_newlines = false
+
+[output.notification]
+on_recording_start = false
+on_recording_stop = false
+on_transcription = false
+show_engine_icon = false
+
+[parakeet]
+model = "parakeet-unified-en-0.6b-int8"
+on_demand_loading = false
+streaming = true
+streaming_chunk_secs = 0.32
+streaming_left_context_secs = 5.6
+streaming_right_context_secs = 0.32
+
+[text]
+spoken_punctuation = false
+smart_auto_submit = false
+
+[osd]
+enabled = true
+frontend = "native"
+position = "bottom-center"
+width_px = 400
+height_px = 48
+margin_px = 24
+opacity = 0.5
+waveform_window_secs = 2.0
+waveform_gain = 10.0
+
+[status]
+icon_theme = "omarchy"

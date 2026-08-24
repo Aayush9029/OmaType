@@ -646,6 +646,12 @@ pub enum Commands {
         action: RecordAction,
     },
 
+    /// Browse and manage local dictation history
+    History {
+        #[command(subcommand)]
+        action: HistoryAction,
+    },
+
     /// Meeting transcription mode
     ///
     /// Continuous meeting transcription with chunked processing,
@@ -790,6 +796,36 @@ pub enum RecordAction {
     },
     /// Cancel current recording or transcription (discard without output)
     Cancel,
+}
+
+#[derive(Subcommand)]
+pub enum HistoryAction {
+    /// List recent transcripts
+    List {
+        /// Maximum number of entries to return
+        #[arg(long, short, default_value = "20")]
+        limit: usize,
+
+        /// Emit a JSON array for desktop integrations
+        #[arg(long)]
+        json: bool,
+    },
+    /// Copy one transcript to the clipboard
+    Copy {
+        /// Transcript identifier from `history list --json`
+        id: String,
+    },
+    /// Delete one transcript
+    Delete {
+        /// Transcript identifier from `history list --json`
+        id: String,
+    },
+    /// Delete all transcript history
+    Clear {
+        /// Confirm deletion without an interactive prompt
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 /// Meeting mode actions
@@ -2295,6 +2331,31 @@ mod tests {
                 assert_eq!(action.smart_auto_submit_override(), None);
             }
             _ => panic!("Expected Record command"),
+        }
+    }
+
+    #[test]
+    fn test_history_list_json_limit() {
+        let cli = Cli::parse_from(["voxtype", "history", "list", "--json", "--limit", "7"]);
+        match cli.command {
+            Some(Commands::History {
+                action: HistoryAction::List { limit, json },
+            }) => {
+                assert_eq!(limit, 7);
+                assert!(json);
+            }
+            _ => panic!("Expected History List command"),
+        }
+    }
+
+    #[test]
+    fn test_history_clear_requires_explicit_force_flag_value() {
+        let cli = Cli::parse_from(["voxtype", "history", "clear", "--force"]);
+        match cli.command {
+            Some(Commands::History {
+                action: HistoryAction::Clear { force },
+            }) => assert!(force),
+            _ => panic!("Expected History Clear command"),
         }
     }
 

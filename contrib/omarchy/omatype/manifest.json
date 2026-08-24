@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "id": "local.omatype",
+  "name": "OmaType",
+  "version": "0.1.0",
+  "author": "Aayush Pokharel",
+  "license": "MIT",
+  "description": "OmaType status, controls, and local transcript history in the Omarchy bar.",
+  "kinds": ["bar-widget"],
+  "activation": "on-demand",
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "OmaType",
+    "description": "Record, inspect status, and copy or delete recent local transcripts.",
+    "category": "System",
+    "aliases": ["voice", "dictation", "transcription"],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "command": "voxtype",
+      "historyLimit": 12,
+      "refreshIntervalMs": 750
+    },
+    "schema": [
+      {
+        "key": "command",
+        "type": "string",
+        "label": "OmaType command",
+        "defaultValue": "voxtype"
+      },
+      {
+        "key": "historyLimit",
+        "type": "integer",
+        "label": "Transcripts to load",
+        "min": 4,
+        "max": 50,
+        "step": 1,
+        "defaultValue": 12
+      },
+      {
+        "key": "refreshIntervalMs",
+        "type": "integer",
+        "label": "Status refresh interval (milliseconds)",
+        "min": 250,
+        "max": 5000,
+        "step": 250,
+        "defaultValue": 750
+      }
+    ]
+  }
+}

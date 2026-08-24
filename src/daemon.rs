@@ -673,6 +673,24 @@ pub struct Daemon {
 }
 
 impl Daemon {
+    fn remember_transcript(&self, text: &str, duration_secs: f32, mode: &str) {
+        let text = text.trim();
+        if text.is_empty() {
+            return;
+        }
+
+        let entry = crate::history::HistoryEntry::new(
+            duration_secs,
+            mode,
+            format!("{:?}", self.config.engine).to_lowercase(),
+            self.config.model_name(),
+            text,
+        );
+        if let Err(error) = crate::history::add(entry) {
+            tracing::warn!("Failed to save transcript history: {}", error);
+        }
+    }
+
     /// Create a new daemon with the given configuration
     pub fn new(config: Config, config_path: Option<PathBuf>) -> Self {
         let state_file_path = config.resolve_state_file();
@@ -999,6 +1017,15 @@ impl Daemon {
             let _ = h.task.await;
         }
         self.stop_streaming_drain_pump();
+
+        let duration_secs = state
+            .recording_duration()
+            .map(|duration| duration.as_secs_f32())
+            .unwrap_or_default();
+        if let Some(session) = streaming_session.as_ref() {
+            self.remember_transcript(session.finalized_text(), duration_secs, "live");
+        }
+
         *streaming_session = None;
         *streaming_chain = None;
 
@@ -1942,6 +1969,12 @@ impl Daemon {
         // task error). The Ok(Ok(_)) branch consults it for the language
         // layout hint before letting it drop.
         let active_transcriber = self.active_transcriber.take();
+        let audio_duration_secs = match state {
+            State::Transcribing { audio } => {
+                audio.len() as f32 / self.config.audio.sample_rate as f32
+            }
+            _ => 0.0,
+        };
         match result {
             Ok(Ok(text)) => {
                 if text.is_empty() {
@@ -2062,6 +2095,8 @@ impl Daemon {
                     } else {
                         processed_text
                     };
+
+                    self.remember_transcript(&final_text, audio_duration_secs, "batch");
 
                     // Track last dictation for context in subsequent post-processing
                     self.last_dictation = Some((final_text.clone(), Instant::now()));
@@ -3678,8 +3713,12 @@ impl Daemon {
                     match event {
                         Some(StreamingEvent::Partial { text, .. }) => {
                             if let State::Streaming { partial_buffer, .. } = &mut state {
-                                partial_buffer.clear();
-                                partial_buffer.push_str(&text);
+                                if hybrid_pending {
+                                    partial_buffer.push_str(&text);
+                                } else {
+                                    partial_buffer.clear();
+                                    partial_buffer.push_str(&text);
+                                }
                             }
 
                             // Hybrid's first two seconds are deliberately private.
