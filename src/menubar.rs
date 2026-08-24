@@ -254,6 +254,7 @@ fn set_hotkey_mode(mode: ActivationMode) -> bool {
     let mode_str = match mode {
         ActivationMode::PushToTalk => "push_to_talk",
         ActivationMode::Toggle => "toggle",
+        ActivationMode::Hybrid => "hybrid",
     };
 
     // Check if [hotkey] section exists

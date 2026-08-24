@@ -1,4 +1,12 @@
-# Voxtype
+# OmaType
+
+OmaType is Aayush's personal fork of [Voxtype](https://github.com/peteonrails/voxtype), tuned for fast local Parakeet dictation and a hybrid Home-key workflow:
+
+- Tap once to begin an accurate batch recording, then tap again to transcribe and type it.
+- Hold past a configurable threshold to begin live typing, then release to stop.
+- Audio capture begins on the initial press, so promoting to live mode does not lose the opening words.
+
+The executable, service, and configuration paths intentionally remain named `voxtype` for compatibility with existing installations and upstream updates.
 
 [![Voxtype - Voice to Text for Linux](website/images/og-preview.png)](https://voxtype.io)
 

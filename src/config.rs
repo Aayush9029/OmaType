@@ -360,6 +360,9 @@ pub enum ActivationMode {
     PushToTalk,
     /// Press once to start recording, press again to stop
     Toggle,
+    /// Short tap toggles batch recording; holding crosses a threshold and
+    /// streams live until the key is released.
+    Hybrid,
 }
 
 /// Root configuration structure
@@ -462,6 +465,10 @@ pub struct HotkeyConfig {
     #[serde(default)]
     pub mode: ActivationMode,
 
+    /// Hold duration that promotes a hybrid-mode press to live streaming.
+    #[serde(default = "default_hybrid_hold_secs")]
+    pub hybrid_hold_secs: f32,
+
     /// Enable built-in hotkey detection (default: true)
     /// Set to false when using compositor keybindings (Hyprland, Sway) instead
     /// When disabled, use `voxtype record start/stop/toggle` to control recording
@@ -485,6 +492,10 @@ pub struct HotkeyConfig {
     /// Example: { "LEFTSHIFT" = "translate" } activates [profiles.translate] when Shift is held
     #[serde(default)]
     pub profile_modifiers: HashMap<String, String>,
+}
+
+fn default_hybrid_hold_secs() -> f32 {
+    2.0
 }
 
 /// Audio capture configuration
@@ -2342,6 +2353,7 @@ impl Default for Config {
                 key: default_hotkey_key(),
                 modifiers: vec![],
                 mode: ActivationMode::default(),
+                hybrid_hold_secs: default_hybrid_hold_secs(),
                 enabled: true,
                 cancel_key: None,
                 model_modifier: None,
@@ -3042,6 +3054,34 @@ mod tests {
         assert!(config.audio.feedback.enabled);
         assert_eq!(config.audio.feedback.theme, "subtle");
         assert_eq!(config.audio.feedback.volume, 0.5);
+    }
+
+    #[test]
+    fn test_parse_hybrid_mode() {
+        let toml_str = r#"
+            [hotkey]
+            key = "F13"
+            mode = "hybrid"
+            hybrid_hold_secs = 2.0
+
+            [audio]
+            device = "default"
+            sample_rate = 16000
+            max_duration_secs = 1800
+
+            [whisper]
+            model = "base.en"
+            language = "en"
+
+            [output]
+            mode = "type"
+        "#;
+
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.hotkey.key, "F13");
+        assert_eq!(config.hotkey.mode, ActivationMode::Hybrid);
+        assert_eq!(config.hotkey.hybrid_hold_secs, 2.0);
+        assert_eq!(config.audio.max_duration_secs, 1800);
     }
 
     #[test]

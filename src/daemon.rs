@@ -2292,6 +2292,8 @@ impl Daemon {
         // the daemon gets stuck in streaming. Force toggle activation when
         // streaming is enabled. The user's config file is left untouched; this
         // override only applies to the running daemon.
+        // Hybrid mode deliberately owns press/release events and starts with a
+        // two-second silent streaming probe, so it must not be auto-promoted.
         if self.config.streaming_active()
             && self.config.hotkey.mode == crate::config::ActivationMode::PushToTalk
         {
@@ -2563,6 +2565,7 @@ impl Daemon {
             let mode_desc = match activation_mode {
                 ActivationMode::PushToTalk => "hold to record, release to transcribe",
                 ActivationMode::Toggle => "press to start/stop recording",
+                ActivationMode::Hybrid => "tap for batch toggle, hold for live streaming",
             };
             tracing::info!(
                 "Listening for hotkey: {} ({})",
@@ -2582,6 +2585,15 @@ impl Daemon {
         let mut streaming_handle: Option<StreamHandle> = None;
         let mut streaming_session: Option<StreamingSession> = None;
         let mut streaming_chain: Option<Vec<Box<dyn TextOutput>>> = None;
+
+        // Hybrid mode begins a streaming-capable capture immediately but keeps
+        // partials private until the hold threshold. A release before that
+        // threshold converts the same capture into an ordinary batch-toggle
+        // recording, preserving every sample from the initial press.
+        let hybrid_hold_duration =
+            Duration::from_secs_f32(self.config.hotkey.hybrid_hold_secs.max(0.1));
+        let mut hybrid_pending = false;
+        let mut hybrid_live = false;
 
         loop {
             tokio::select! {
@@ -3014,11 +3026,114 @@ impl Daemon {
                             tracing::trace!("Ignoring HotkeyEvent::Released in toggle mode");
                         }
 
+                        // === HYBRID MODE ===
+                        // Tap: keep recording after release and stop/transcribe on the
+                        // next press. Hold: reveal live partials after the configured
+                        // threshold and stop the stream on release.
+                        (HotkeyEvent::Pressed { model_override, profile_override }, ActivationMode::Hybrid) => {
+                            tracing::debug!(
+                                "Received HotkeyEvent::Pressed (hybrid), state={:?}",
+                                state
+                            );
+
+                            if state.is_idle() {
+                                if let Some(ref profile_name) = profile_override {
+                                    write_profile_override(profile_name);
+                                }
+
+                                if self.try_start_streaming(
+                                    &transcriber_preloaded,
+                                    &mut state,
+                                    &mut audio_capture,
+                                    &mut streaming_handle,
+                                    &mut streaming_session,
+                                    &mut streaming_chain,
+                                    model_override.clone(),
+                                ).await {
+                                    hybrid_pending = true;
+                                    hybrid_live = false;
+                                    tracing::info!(
+                                        "Hybrid capture started; hold {:.1}s for live typing or release for batch toggle",
+                                        hybrid_hold_duration.as_secs_f32()
+                                    );
+                                } else {
+                                    // A non-streaming backend can still provide the tap-to-toggle
+                                    // half of hybrid mode.
+                                    match self.start_recording_capture().await {
+                                        Ok(capture) => {
+                                            audio_capture = Some(capture);
+                                            state = State::Recording {
+                                                started_at: std::time::Instant::now(),
+                                                model_override: model_override.clone(),
+                                            };
+                                            self.update_state("recording");
+                                            self.play_feedback(SoundEvent::RecordingStart);
+                                            self.pause_media_players().await;
+                                        }
+                                        Err(()) => cleanup_profile_override(),
+                                    }
+                                }
+                            } else if let State::Recording { model_override: current_model_override, .. } = &state {
+                                // A batch-toggle recording is already active: this press ends it.
+                                let transcriber = match self.get_transcriber_for_recording(
+                                    current_model_override.as_deref(),
+                                    &transcriber_preloaded,
+                                ).await {
+                                    Ok(t) => Some(t),
+                                    Err(()) => {
+                                        state = State::Idle;
+                                        self.update_state("idle");
+                                        continue;
+                                    }
+                                };
+                                self.start_transcription_task(
+                                    &mut state,
+                                    &mut audio_capture,
+                                    transcriber,
+                                ).await;
+                            }
+                        }
+
+                        (HotkeyEvent::Released, ActivationMode::Hybrid) => {
+                            if hybrid_pending && state.is_streaming() {
+                                // Short tap: stop only the speculative decoder. Keep the
+                                // microphone capture alive and convert it to batch toggle.
+                                hybrid_pending = false;
+                                hybrid_live = false;
+                                self.cut_streaming_audio();
+
+                                if let Some(h) = streaming_handle.take() {
+                                    let _ = h.cancel.send(());
+                                    let _ = h.task.await;
+                                }
+                                streaming_session = None;
+                                streaming_chain = None;
+
+                                let (started_at, model_override) = match &state {
+                                    State::Streaming { started_at, model_override, .. } => {
+                                        (*started_at, model_override.clone())
+                                    }
+                                    _ => (std::time::Instant::now(), None),
+                                };
+                                state = State::Recording { started_at, model_override };
+                                self.update_state("recording");
+                                tracing::info!("Hybrid short tap: batch toggle recording active");
+                            } else if hybrid_live && state.is_streaming() {
+                                hybrid_live = false;
+                                tracing::info!("Hybrid hold released: finalizing live stream");
+                                self.stop_streaming_capture(&mut audio_capture).await;
+                            } else {
+                                tracing::trace!("Hybrid release ignored in current state");
+                            }
+                        }
+
                         // === CANCEL KEY (works in both modes) ===
                         (HotkeyEvent::Cancel, _) => {
                             tracing::debug!("Received HotkeyEvent::Cancel");
 
                             if state.is_streaming() {
+                                hybrid_pending = false;
+                                hybrid_live = false;
                                 tracing::info!("Streaming cancelled via hotkey");
                                 self.cancel_streaming_to_idle(
                                     &mut state,
@@ -3100,10 +3215,51 @@ impl Daemon {
                     }
                 }
 
+                // Promote a held hybrid press to live typing. Streaming has
+                // already been decoding from the initial key-down, so the
+                // first visible partial includes the opening two seconds.
+                _ = tokio::time::sleep(Duration::from_millis(25)), if hybrid_pending => {
+                    let threshold_reached = state
+                        .recording_duration()
+                        .is_some_and(|d| d >= hybrid_hold_duration);
+
+                    if threshold_reached && state.is_streaming() {
+                        hybrid_pending = false;
+                        hybrid_live = true;
+
+                        let buffered = match &state {
+                            State::Streaming { partial_buffer, .. } => partial_buffer.clone(),
+                            _ => String::new(),
+                        };
+                        if !buffered.is_empty() {
+                            if let (Some(s), Some(chain)) =
+                                (streaming_session.as_mut(), streaming_chain.as_ref())
+                            {
+                                if let Err(e) = s.type_partial_delta(
+                                    chain,
+                                    buffered,
+                                    self.config.output.pre_output_command.as_deref(),
+                                    self.config.output.post_output_command.as_deref(),
+                                ).await {
+                                    tracing::warn!("Hybrid initial partial type failed: {}", e);
+                                }
+                                if let State::Streaming { typed_chars, .. } = &mut state {
+                                    *typed_chars = s.typed_chars();
+                                }
+                            }
+                        }
+                        tracing::info!("Hybrid hold threshold reached: live typing enabled");
+                    } else if !state.is_streaming() {
+                        hybrid_pending = false;
+                    }
+                }
+
                 // Check for recording timeout and cancel requests
                 _ = tokio::time::sleep(Duration::from_millis(100)), if state.is_recording() => {
                     // Check for cancel request first
                     if check_cancel_requested() {
+                        hybrid_pending = false;
+                        hybrid_live = false;
                         tracing::info!("Recording cancelled");
 
                         // Stop recording and discard audio
@@ -3521,19 +3677,29 @@ impl Daemon {
                 }, if state.is_streaming() && streaming_handle.is_some() => {
                     match event {
                         Some(StreamingEvent::Partial { text, .. }) => {
-                            if let (Some(s), Some(chain)) =
-                                (streaming_session.as_mut(), streaming_chain.as_ref())
-                            {
-                                if let Err(e) = s.type_partial_delta(
-                                    chain,
-                                    text,
-                                    self.config.output.pre_output_command.as_deref(),
-                                    self.config.output.post_output_command.as_deref(),
-                                ).await {
-                                    tracing::warn!("Streaming partial delta type failed: {}", e);
-                                }
-                                if let State::Streaming { typed_chars, .. } = &mut state {
-                                    *typed_chars = s.typed_chars();
+                            if let State::Streaming { partial_buffer, .. } = &mut state {
+                                partial_buffer.clear();
+                                partial_buffer.push_str(&text);
+                            }
+
+                            // Hybrid's first two seconds are deliberately private.
+                            // Once promoted (or in regular streaming modes), type
+                            // the normal incremental delta.
+                            if !hybrid_pending {
+                                if let (Some(s), Some(chain)) =
+                                    (streaming_session.as_mut(), streaming_chain.as_ref())
+                                {
+                                    if let Err(e) = s.type_partial_delta(
+                                        chain,
+                                        text,
+                                        self.config.output.pre_output_command.as_deref(),
+                                        self.config.output.post_output_command.as_deref(),
+                                    ).await {
+                                        tracing::warn!("Streaming partial delta type failed: {}", e);
+                                    }
+                                    if let State::Streaming { typed_chars, .. } = &mut state {
+                                        *typed_chars = s.typed_chars();
+                                    }
                                 }
                             }
                         }
@@ -3580,6 +3746,8 @@ impl Daemon {
                             }
                         }
                         Some(StreamingEvent::Error(err)) => {
+                            hybrid_pending = false;
+                            hybrid_live = false;
                             tracing::error!("Streaming backend error: {}", err);
                             send_notification(
                                 "Streaming Error",
@@ -3597,6 +3765,8 @@ impl Daemon {
                             ).await;
                         }
                         Some(StreamingEvent::Ended) | None => {
+                            hybrid_pending = false;
+                            hybrid_live = false;
                             self.end_streaming(
                                 &mut state,
                                 &mut audio_capture,
