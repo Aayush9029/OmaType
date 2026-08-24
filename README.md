@@ -14,11 +14,7 @@
   <br>
   <img src="assets/omatype-waveform.png" width="390" alt="OmaType floating live dictation waveform">
   <img src="assets/omatype-recording-bar.png" width="390" alt="OmaType batch recording bar with elapsed time and waveform">
-  <br>
-  <img src="assets/omatype-processing-bar.png" width="390" alt="OmaType animated processing helix">
 </p>
-
-OmaType is local voice typing for Omarchy with a warm Parakeet model and transcript history.
 
 ## How it works
 
