@@ -27,7 +27,7 @@ pub mod systemd;
 pub mod vad;
 pub mod waybar;
 
-use crate::config::Config;
+use crate::config::{Config, TranscriptionEngine};
 use std::process::Stdio;
 use tokio::process::Command;
 
@@ -547,7 +547,11 @@ pub async fn run_setup(
         .map(model::is_parakeet_model)
         .unwrap_or(false);
     let is_sensevoice = model_override
-        .map(model::is_sensevoice_model)
+        .map(|name| {
+            model::is_sensevoice_model(name)
+                && (matches!(config.engine, TranscriptionEngine::SenseVoice)
+                    || !model::is_valid_model(name))
+        })
         .unwrap_or(false);
 
     // Validate model_override if provided (variable unused after this, each branch re-defines)
@@ -605,8 +609,10 @@ pub async fn run_setup(
                         .unwrap_or(0.0);
                     print_success(&format!("Model ready: {} ({:.0} MB)", model_name, size));
                 }
+                model::set_sensevoice_config(model_name)?;
             } else if download {
                 model::download_sensevoice_model(model_name)?;
+                model::set_sensevoice_config(model_name)?;
             } else if !quiet {
                 print_info(&format!("Model '{}' not downloaded yet", model_name));
                 println!(

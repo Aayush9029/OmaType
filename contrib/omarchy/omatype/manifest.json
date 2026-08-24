@@ -2,14 +2,16 @@
   "schemaVersion": 1,
   "id": "local.omatype",
   "name": "OmaType",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "Aayush Pokharel",
   "license": "MIT",
   "description": "OmaType status, controls, and local transcript history in the Omarchy bar.",
-  "kinds": ["bar-widget"],
+  "kinds": ["bar-widget", "service"],
+  "keepLoaded": true,
   "activation": "on-demand",
   "entryPoints": {
-    "barWidget": "Panel.qml"
+    "barWidget": "Panel.qml",
+    "service": "service.qml"
   },
   "barWidget": {
     "displayName": "OmaType",

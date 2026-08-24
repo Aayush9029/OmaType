@@ -188,6 +188,20 @@ const PARAKEET_MODELS: &[ParakeetModelInfo] = &[
         huggingface_repo: "bobNight/parakeet-unified-en-0.6b-onnx",
         streaming_compatible: true,
     },
+    ParakeetModelInfo {
+        name: "parakeet-unified-en-0.6b-int8",
+        size_mb: 633,
+        description: "Streaming-capable INT8, English-only (recommended for OmaType)",
+        files: &[
+            ("encoder.int8.onnx", 42_606_669),
+            ("encoder.int8.onnx.data", 611_491_584),
+            ("decoder_joint.int8.onnx", 8_995_064),
+            ("tokenizer.model", 251_056),
+            ("vocab.txt", 4_929),
+        ],
+        huggingface_repo: "bobNight/parakeet-unified-en-0.6b-onnx",
+        streaming_compatible: true,
+    },
 ];
 
 /// Returns true when the named Parakeet model ships everything the cache-aware
@@ -1727,12 +1741,36 @@ fn download_parakeet_model_by_info(model: &ParakeetModelInfo) -> anyhow::Result<
         }
     }
 
+    // parakeet-rs expects the canonical filenames. The quantized unified model
+    // is published with `.int8` in its filenames, so provide lightweight
+    // aliases without duplicating the large model data file.
+    if model.name == "parakeet-unified-en-0.6b-int8" {
+        create_model_alias(&model_path, "encoder.int8.onnx", "encoder.onnx")?;
+        create_model_alias(&model_path, "encoder.int8.onnx.data", "encoder.onnx.data")?;
+        create_model_alias(&model_path, "decoder_joint.int8.onnx", "decoder_joint.onnx")?;
+    }
+
     // Validate all files are present
     validate_parakeet_model(&model_path)?;
     print_success(&format!(
         "Model '{}' downloaded to {:?}",
         model.name, model_path
     ));
+
+    Ok(())
+}
+
+fn create_model_alias(model_path: &Path, source: &str, alias: &str) -> anyhow::Result<()> {
+    let alias_path = model_path.join(alias);
+    if alias_path.exists() {
+        return Ok(());
+    }
+
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(source, &alias_path)?;
+
+    #[cfg(not(unix))]
+    std::fs::hard_link(model_path.join(source), &alias_path)?;
 
     Ok(())
 }
@@ -2635,6 +2673,20 @@ fn update_config_sensevoice(model_name: &str) -> anyhow::Result<()> {
             print_info("No config file found. Run 'voxtype setup' first.");
             Ok(())
         }
+    } else {
+        anyhow::bail!("Could not determine config path")
+    }
+}
+
+/// Update config to use SenseVoice engine and a specific model (quiet, no output).
+pub fn set_sensevoice_config(model_name: &str) -> anyhow::Result<()> {
+    if let Some(config_path) = Config::default_path() {
+        if config_path.exists() {
+            let content = std::fs::read_to_string(&config_path)?;
+            let updated = update_sensevoice_in_config(&content, model_name);
+            std::fs::write(&config_path, updated)?;
+        }
+        Ok(())
     } else {
         anyhow::bail!("Could not determine config path")
     }

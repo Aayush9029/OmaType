@@ -1261,6 +1261,7 @@ fn resample(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
 
 /// Extended status info for JSON output
 struct ExtendedStatusInfo {
+    engine: &'static str,
     model: String,
     device: String,
     backend: String,
@@ -1268,6 +1269,17 @@ struct ExtendedStatusInfo {
 
 impl ExtendedStatusInfo {
     fn from_config(config: &config::Config) -> Self {
+        let engine = match config.engine {
+            config::TranscriptionEngine::Whisper => "whisper",
+            config::TranscriptionEngine::Parakeet => "parakeet",
+            config::TranscriptionEngine::Moonshine => "moonshine",
+            config::TranscriptionEngine::SenseVoice => "sensevoice",
+            config::TranscriptionEngine::Paraformer => "paraformer",
+            config::TranscriptionEngine::Dolphin => "dolphin",
+            config::TranscriptionEngine::Omnilingual => "omnilingual",
+            config::TranscriptionEngine::Cohere => "cohere",
+            config::TranscriptionEngine::Soniox => "soniox",
+        };
         // Resolve the actual backend through the inventory machinery — this is
         // wrapper-script aware (see setup::binary::active_variant) so it
         // reports correctly whether /usr/bin/voxtype is a plain symlink or the
@@ -1303,6 +1315,7 @@ impl ExtendedStatusInfo {
         };
 
         Self {
+            engine,
             model: config.model_name().to_string(),
             device: config.audio.device.clone(),
             backend,
@@ -1526,8 +1539,8 @@ fn format_state_json(
                 base_tooltip, info.model, info.device, info.backend
             );
             format!(
-                r#"{{"text": "{}", "alt": "{}", "class": "{}", "tooltip": "{}", "model": "{}", "device": "{}", "backend": "{}"}}"#,
-                text, alt, class, tooltip, info.model, info.device, info.backend
+                r#"{{"text": "{}", "alt": "{}", "class": "{}", "tooltip": "{}", "engine": "{}", "model": "{}", "device": "{}", "backend": "{}"}}"#,
+                text, alt, class, tooltip, info.engine, info.model, info.device, info.backend
             )
         }
         None => {

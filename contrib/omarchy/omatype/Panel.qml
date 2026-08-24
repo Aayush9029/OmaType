@@ -12,13 +12,34 @@ Panel {
   ipcTarget: "local.omatype"
   manageIpc: false
 
-  property var status: ({ alt: "stopped", model: "", backend: "" })
+  property var status: ({ alt: "stopped", engine: "", model: "", backend: "" })
   property var historyEntries: []
   property string lastError: ""
   property string copiedEntryId: ""
   property string pendingDeleteId: ""
   property int selectedEntry: 0
   property bool cursorActive: false
+  property bool showingModels: false
+  property string pendingModel: ""
+  property string modelError: ""
+
+  readonly property var modelOptions: [
+    {
+      id: "parakeet-unified-en-0.6b-int8", engine: "parakeet",
+      title: "Parakeet Live", size: "633 MB", languages: "English",
+      detail: "Fastest · supports tap and live dictation", recommended: true
+    },
+    {
+      id: "small", engine: "whisper",
+      title: "Whisper Small", size: "466 MB", languages: "Multilingual",
+      detail: "More languages · accurate tap mode", recommended: false
+    },
+    {
+      id: "small", engine: "sensevoice",
+      title: "SenseVoice Small", size: "239 MB", languages: "ZH · EN · JA · KO · YUE",
+      detail: "Lightest multilingual option · tap mode", recommended: false
+    }
+  ]
 
   readonly property string state: String(status.alt || "stopped")
   readonly property bool recording: state === "recording" || state === "streaming"
@@ -61,6 +82,21 @@ Panel {
     runAction(["record", "toggle"])
   }
 
+  function modelIsActive(option) {
+    return String(status.engine || "") === option.engine
+      && String(status.model || "") === option.id
+  }
+
+  function useModel(option) {
+    if (modelProc.running || restartProc.running || modelIsActive(option)) return
+    modelError = ""
+    pendingModel = option.engine + ":" + option.id
+    modelProc.command = commandFor([
+      "--engine", option.engine, "setup", "--download", "--model", option.id, "--quiet"
+    ])
+    modelProc.running = true
+  }
+
   function copyEntry(entry) {
     if (!entry || !entry.id) return
     copiedEntryId = String(entry.id)
@@ -92,7 +128,7 @@ Panel {
   function stateDetail() {
     if (lastError !== "") return lastError
     if (recording) return state === "streaming" ? "Release Home to finish" : "Tap Home again to finish"
-    if (working) return "Parakeet is processing the complete recording"
+    if (working) return "OmaType is processing the complete recording"
     var model = String(status.model || "")
     return model !== "" ? model : "Tap Home for batch · hold for live"
   }
@@ -130,6 +166,7 @@ Panel {
     cursorActive = false
     selectedEntry = 0
     pendingDeleteId = ""
+    showingModels = false
     refreshStatus()
     refreshHistory()
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
@@ -174,6 +211,33 @@ Panel {
   }
 
   Process {
+    id: modelProc
+    stdout: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: if (String(text || "").trim() !== "") root.modelError = String(text).trim()
+    }
+    onExited: function(exitCode) {
+      if (exitCode === 0) {
+        root.modelError = ""
+        restartProc.command = ["systemctl", "--user", "restart", "omatype.service"]
+        restartProc.running = true
+      } else {
+        root.pendingModel = ""
+      }
+    }
+  }
+
+  Process {
+    id: restartProc
+    onExited: function(exitCode) {
+      root.pendingModel = ""
+      if (exitCode !== 0) root.modelError = "Model installed, but the OmaType service could not restart"
+      root.refreshStatus()
+    }
+  }
+
+  Process {
     id: historyProc
     stdout: StdioCollector {
       waitForEnd: true
@@ -213,6 +277,7 @@ Panel {
     function show(): void { root.open() }
     function hide(): void { root.close() }
     function toggle(): void { root.toggle() }
+    function models(): void { root.showingModels = true; root.open() }
     function refresh(): string { root.refreshStatus(); root.refreshHistory(); return "ok" }
     function record(): string { root.toggleRecording(); return "ok" }
   }
@@ -248,16 +313,17 @@ Panel {
       id: keyCatcher
       anchors.fill: parent
       onMoveRequested: function(dx, dy) {
+        if (root.showingModels) return
         if (root.historyEntries.length === 0 || dy === 0) return
         root.cursorActive = true
         root.selectedEntry = Math.max(0, Math.min(root.historyEntries.length - 1, root.selectedEntry + dy))
       }
-      onActivateRequested: if (root.historyEntries.length > 0) root.copyEntry(root.historyEntries[root.selectedEntry])
+      onActivateRequested: if (!root.showingModels && root.historyEntries.length > 0) root.copyEntry(root.historyEntries[root.selectedEntry])
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(text) {
-        if (text === " " || text === "r" || text === "R") root.toggleRecording()
-        else if ((text === "d" || text === "D") && root.historyEntries.length > 0)
+        if (root.showingModels) return
+        if ((text === "d" || text === "D") && root.historyEntries.length > 0)
           root.requestDelete(root.historyEntries[root.selectedEntry])
         else if (text === "c" || text === "C") {
           if (root.historyEntries.length > 0) root.copyEntry(root.historyEntries[root.selectedEntry])
@@ -336,6 +402,7 @@ Panel {
         }
 
         RowLayout {
+          visible: !root.showingModels
           width: parent.width
           Text {
             text: "RECENT TRANSCRIPTS"
@@ -354,7 +421,7 @@ Panel {
         }
 
         Rectangle {
-          visible: root.historyEntries.length === 0
+          visible: !root.showingModels && root.historyEntries.length === 0
           width: parent.width
           implicitHeight: emptyColumn.implicitHeight + Style.space(32)
           radius: Style.space(12)
@@ -382,7 +449,7 @@ Panel {
         }
 
         Flickable {
-          visible: root.historyEntries.length > 0
+          visible: !root.showingModels && root.historyEntries.length > 0
           width: parent.width
           height: Math.min(historyColumn.implicitHeight, Style.space(330))
           contentHeight: historyColumn.implicitHeight
@@ -476,18 +543,77 @@ Panel {
           }
         }
 
-        ActionButton {
+        RowLayout {
+          visible: !root.showingModels
           width: parent.width
-          text: root.recording ? "Stop recording" : "Start recording"
-          glyph: root.recording ? "󰓛" : "󰐊"
-          enabled: root.ready && !root.working && !actionProc.running
-          destructive: root.recording
-          onClicked: root.toggleRecording()
+          spacing: Style.space(8)
+
+          ActionButton {
+            Layout.fillWidth: true
+            text: root.recording ? "Stop recording" : "Start recording"
+            glyph: root.recording ? "󰓛" : "󰐊"
+            enabled: root.ready && !root.working && !actionProc.running
+            destructive: root.recording
+            onClicked: root.toggleRecording()
+          }
+          ActionButton {
+            Layout.preferredWidth: Style.space(110)
+            text: "Models"
+            glyph: "󰚩"
+            enabled: !root.busy
+            onClicked: root.showingModels = true
+          }
+        }
+
+        Column {
+          visible: root.showingModels
+          width: parent.width
+          spacing: Style.space(8)
+
+          RowLayout {
+            width: parent.width
+            Text {
+              text: "CURATED MODELS"
+              color: root.muted
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              font.bold: true
+            }
+            Item { Layout.fillWidth: true }
+            MiniButton {
+              glyph: "󰁍"
+              tooltip: "Back to transcripts"
+              onClicked: root.showingModels = false
+            }
+          }
+
+          Repeater {
+            model: root.modelOptions
+            delegate: ModelCard {
+              required property var modelData
+              width: parent.width
+              option: modelData
+            }
+          }
+
+          Text {
+            visible: root.modelError !== ""
+            width: parent.width
+            text: root.modelError
+            color: "#fb7185"
+            wrapMode: Text.Wrap
+            maximumLineCount: 3
+            elide: Text.ElideRight
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
         }
 
         Text {
           width: parent.width
-          text: "Enter copies  ·  D deletes  ·  Space records  ·  Esc closes"
+          text: root.showingModels
+            ? "Models download locally · switching restarts OmaType"
+            : "Enter copies  ·  D deletes  ·  Esc closes"
           color: root.muted
           horizontalAlignment: Text.AlignHCenter
           font.family: root.fontFamily
@@ -524,6 +650,88 @@ Panel {
     }
     ToolTip.visible: miniMouse.containsMouse
     ToolTip.text: mini.tooltip
+  }
+
+  component ModelCard: Rectangle {
+    id: modelCard
+    required property var option
+    readonly property bool activeModel: root.modelIsActive(option)
+    readonly property bool installing: root.pendingModel === option.engine + ":" + option.id
+
+    implicitHeight: modelContent.implicitHeight + Style.space(20)
+    radius: Style.space(10)
+    color: activeModel ? Style.selectedFillFor(root.foreground, Color.accent) : root.faint
+
+    Column {
+      id: modelContent
+      anchors.left: parent.left
+      anchors.right: modelAction.left
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.leftMargin: Style.space(10)
+      anchors.rightMargin: Style.space(8)
+      spacing: Style.space(3)
+
+      Row {
+        spacing: Style.space(6)
+        Text {
+          text: modelCard.option.title
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          font.bold: true
+        }
+        Text {
+          visible: modelCard.option.recommended
+          text: "RECOMMENDED"
+          color: Color.accent
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          font.bold: true
+        }
+      }
+      Text {
+        width: parent.width
+        text: modelCard.option.detail
+        color: root.muted
+        elide: Text.ElideRight
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+      }
+      Text {
+        text: modelCard.option.size + "  ·  " + modelCard.option.languages
+        color: root.muted
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+      }
+    }
+
+    Rectangle {
+      id: modelAction
+      width: Style.space(82)
+      height: Style.space(30)
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      radius: Style.space(8)
+      color: modelMouse.containsMouse ? Style.selectedFillFor(root.foreground, Color.accent) : "transparent"
+      opacity: modelProc.running || restartProc.running ? (modelCard.installing ? 1.0 : 0.35) : 1.0
+
+      Text {
+        anchors.centerIn: parent
+        text: modelCard.activeModel ? "ACTIVE" : (modelCard.installing ? "INSTALLING" : "USE")
+        color: modelCard.activeModel || modelCard.installing ? Color.accent : root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        font.bold: true
+      }
+      MouseArea {
+        id: modelMouse
+        anchors.fill: parent
+        hoverEnabled: true
+        enabled: !modelCard.activeModel && !modelProc.running && !restartProc.running
+        onClicked: root.useModel(modelCard.option)
+      }
+    }
   }
 
   component ActionButton: Rectangle {

@@ -91,9 +91,11 @@ install_model() {
 install_binary() {
   print_header "OmaType"
   print_status "Building the optimized Parakeet binary"
-  (cd "$ROOT_DIR" && RUSTFLAGS='-C target-cpu=native' cargo build --release --features parakeet --bin voxtype)
+  (cd "$ROOT_DIR" && RUSTFLAGS='-C target-cpu=native' cargo build --release \
+    --features parakeet,sensevoice --bin voxtype --bin voxtype-audio-bridge)
   mkdir -p "$BIN_DIR"
   install -m 0755 "$ROOT_DIR/target/release/voxtype" "$BIN_DIR/omatype"
+  install -m 0755 "$ROOT_DIR/target/release/voxtype-audio-bridge" "$BIN_DIR/omatype-audio-bridge"
   rm -f -- "$BIN_DIR/voxtype"
   print_success "Installed $BIN_DIR/omatype"
 }
@@ -142,6 +144,8 @@ install_plugin() {
   mkdir -p "$PLUGIN_DIR"
   install -m 0644 "$ROOT_DIR/contrib/omarchy/omatype/manifest.json" "$PLUGIN_DIR/manifest.json"
   install -m 0644 "$ROOT_DIR/contrib/omarchy/omatype/Panel.qml" "$PLUGIN_DIR/Panel.qml"
+  install -m 0644 "$ROOT_DIR/contrib/omarchy/omatype/service.qml" "$PLUGIN_DIR/service.qml"
+  rm -f -- "$PLUGIN_DIR/Waveform.qml" "$PLUGIN_DIR/Service.qml"
   omarchy plugin validate "$PLUGIN_DIR"
   omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
   omarchy plugin enable local.omatype --before omarchy.bluetooth >/dev/null 2>&1 \
