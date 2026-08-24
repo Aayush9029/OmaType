@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Default configuration file content
-pub const DEFAULT_CONFIG: &str = r#"# Voxtype Configuration
+pub const DEFAULT_CONFIG: &str = r#"# OmaType Configuration
 #
 # Location: ~/.config/voxtype/config.toml
 # All settings can be overridden via CLI flags

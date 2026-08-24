@@ -56,12 +56,12 @@ async fn send_notification(
     #[cfg(target_os = "linux")]
     {
         let urgency_arg = format!("--urgency={}", crate::output::sanitize_urgency(urgency));
-        // Synchronous + transient hints ([#345]): force a single Voxtype
+        // Synchronous + transient hints ([#345]): force a single OmaType
         // notification slot the compositor overwrites in place, and prevent
         // status updates from accumulating in the notification history.
         let _ = Command::new("notify-send")
             .args([
-                "--app-name=Voxtype",
+                "--app-name=OmaType",
                 &urgency_arg,
                 "--expire-time=2000",
                 "-h",
@@ -2318,7 +2318,7 @@ impl Daemon {
 
     /// Run the daemon main loop
     pub async fn run(&mut self) -> Result<()> {
-        tracing::info!("Starting voxtype daemon");
+        tracing::info!("Starting OmaType daemon");
 
         // Streaming dictation types characters at the cursor while the user is
         // still holding the PTT key. On Wayland compositors backed by libinput

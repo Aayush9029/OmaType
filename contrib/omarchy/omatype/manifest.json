@@ -19,7 +19,7 @@
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {
-      "command": "voxtype",
+      "command": "omatype",
       "historyLimit": 12,
       "refreshIntervalMs": 750
     },
@@ -28,7 +28,7 @@
         "key": "command",
         "type": "string",
         "label": "OmaType command",
-        "defaultValue": "voxtype"
+        "defaultValue": "omatype"
       },
       {
         "key": "historyLimit",

@@ -6,41 +6,40 @@
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "voxtype")]
+#[command(name = "omatype")]
 #[command(author, version, about = "Push-to-talk voice-to-text for Linux")]
 #[command(long_about = "\
-Voxtype is a push-to-talk voice-to-text tool for Linux.\n\
+OmaType is a local voice-to-text tool for Omarchy and Linux.\n\
 Optimized for Wayland, works on X11 too.")]
 #[command(after_help = "\
 QUICK START:
-  voxtype                     Start daemon with hotkey detection
-  voxtype record toggle       Toggle recording (for compositor keybindings)
-  voxtype setup model         Interactive model selection
-  voxtype setup gpu           Manage GPU acceleration
-  voxtype status --follow     Watch daemon status (Waybar integration)
+  omatype                     Start daemon with hotkey detection
+  omatype record toggle       Toggle recording (for compositor keybindings)
+  omatype setup model         Interactive model selection
+  omatype setup gpu           Manage GPU acceleration
+  omatype status --follow     Watch daemon status (Waybar integration)
 
-See 'voxtype --help' for all options or 'man voxtype' for full docs.")]
+See 'omatype --help' for all options.")]
 #[command(after_long_help = "\
 QUICK START:
-  voxtype                     Start daemon with hotkey detection
-  voxtype daemon              Same as above (explicit)
-  voxtype record toggle       Toggle recording (for compositor keybindings)
-  voxtype record start        Start recording
-  voxtype record stop         Stop recording and transcribe
-  voxtype record cancel       Cancel current recording
-  voxtype status              Show daemon status
-  voxtype setup               Check dependencies and download models
-  voxtype config              Show current configuration
+  omatype                     Start daemon with hotkey detection
+  omatype daemon              Same as above (explicit)
+  omatype record toggle       Toggle recording (for compositor keybindings)
+  omatype record start        Start recording
+  omatype record stop         Stop recording and transcribe
+  omatype record cancel       Cancel current recording
+  omatype status              Show daemon status
+  omatype setup               Check dependencies and download models
+  omatype config              Show current configuration
 
 EXAMPLES:
-  voxtype setup model         Interactive model selection (Whisper, Parakeet, or Moonshine)
-  voxtype setup waybar        Show Waybar integration config
-  voxtype setup gpu           Manage GPU acceleration (Vulkan/CUDA/MIGraphX)
-  voxtype setup onnx          Switch between Whisper and ONNX engines
-  voxtype status --follow --format json   Waybar integration
+  omatype setup model         Interactive model selection (Whisper, Parakeet, or Moonshine)
+  omatype setup waybar        Show Waybar integration config
+  omatype setup gpu           Manage GPU acceleration (Vulkan/CUDA/MIGraphX)
+  omatype setup onnx          Switch between Whisper and ONNX engines
+  omatype status --follow --format json   Waybar integration
 
-See 'voxtype <command> --help' for more info on a command.
-See 'man voxtype' or docs/INSTALL.md for setup instructions.")]
+See 'omatype <command> --help' for more info on a command.")]
 pub struct Cli {
     /// Path to config file
     #[arg(short, long, value_name = "FILE")]

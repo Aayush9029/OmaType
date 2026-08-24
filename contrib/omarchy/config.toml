@@ -41,7 +41,7 @@ spoken_punctuation = false
 smart_auto_submit = false
 
 [osd]
-enabled = true
+enabled = false
 frontend = "native"
 position = "bottom-center"
 width_px = 400

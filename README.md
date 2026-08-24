@@ -47,15 +47,15 @@ Right-click the bar icon       Start or stop recording
 The panel follows Petal's compact menu-bar flow in Omarchy's native visual language: current status first, recent transcripts below it, then recording controls. Click a transcript to copy it; use its trash action twice to confirm deletion.
 
 ```bash
-voxtype history list
-voxtype history list --json --limit 20
-voxtype history copy <id>
-voxtype history delete <id>
+omatype history list
+omatype history list --json --limit 20
+omatype history copy <id>
+omatype history delete <id>
 ```
 
 History contains transcript text and basic timing/model metadata only—never recorded audio—and stays at `~/.local/share/voxtype/history.json`. The newest 200 entries are retained.
 
-The executable, service, and config paths intentionally remain named `voxtype` so existing installs and upstream tooling continue to work.
+The installed command and service are `omatype`; the internal data directory remains compatible with the upstream format.
 
 ## Credits
 

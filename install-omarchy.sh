@@ -15,6 +15,7 @@ DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/voxtype"
 MODEL_DIR="$DATA_DIR/models/parakeet-unified-en-0.6b-int8"
 PLUGIN_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins/local.omatype"
 SERVICE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+LEGACY_HOOK="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/hooks/post-update.d/install-voxtype.hook"
 MODEL_BASE_URL="https://huggingface.co/bobNight/parakeet-unified-en-0.6b-onnx/resolve/main"
 
 print_header() { printf "${BOLD}${CYAN}⚡ %s${RESET}\n" "$1"; }
@@ -44,6 +45,18 @@ install_dependencies() {
       exit 1
     fi
   fi
+}
+
+remove_upstream_voxtype() {
+  if command -v pacman >/dev/null 2>&1 && pacman -Qq voxtype-bin >/dev/null 2>&1; then
+    print_status "Removing the upstream VoxType package"
+    if command -v omarchy >/dev/null 2>&1; then
+      omarchy pkg drop voxtype-bin
+    else
+      sudo pacman -Rns --noconfirm voxtype-bin
+    fi
+  fi
+  rm -f -- "$LEGACY_HOOK"
 }
 
 download_model_file() {
@@ -80,8 +93,9 @@ install_binary() {
   print_status "Building the optimized Parakeet binary"
   (cd "$ROOT_DIR" && RUSTFLAGS='-C target-cpu=native' cargo build --release --features parakeet --bin voxtype)
   mkdir -p "$BIN_DIR"
-  install -m 0755 "$ROOT_DIR/target/release/voxtype" "$BIN_DIR/voxtype"
-  print_success "Installed $BIN_DIR/voxtype"
+  install -m 0755 "$ROOT_DIR/target/release/voxtype" "$BIN_DIR/omatype"
+  rm -f -- "$BIN_DIR/voxtype"
+  print_success "Installed $BIN_DIR/omatype"
 }
 
 install_config() {
@@ -96,7 +110,9 @@ install_config() {
 
 install_service() {
   mkdir -p "$SERVICE_DIR"
-  local service_file="$SERVICE_DIR/voxtype.service"
+  local service_file="$SERVICE_DIR/omatype.service"
+  systemctl --user disable --now voxtype.service >/dev/null 2>&1 || true
+  rm -f -- "$SERVICE_DIR/voxtype.service"
   {
     printf '%s\n' '[Unit]'
     printf '%s\n' 'Description=OmaType local voice-to-text daemon'
@@ -104,16 +120,16 @@ install_service() {
     printf '%s\n' 'After=graphical-session.target'
     printf '\n%s\n' '[Service]'
     printf '%s\n' 'Type=simple'
-    printf 'ExecStart=%s daemon\n' "$BIN_DIR/voxtype"
+    printf 'ExecStart=%s daemon\n' "$BIN_DIR/omatype"
     printf '%s\n' 'Restart=on-failure'
     printf '%s\n' 'RestartSec=5'
-    printf '%s\n' 'Environment=XDG_RUNTIME_DIR=%%t'
+    printf '%s\n' 'Environment=XDG_RUNTIME_DIR=%t'
     printf '\n%s\n' '[Install]'
     printf '%s\n' 'WantedBy=graphical-session.target'
   } > "$service_file"
   systemctl --user daemon-reload
-  systemctl --user enable voxtype.service
-  systemctl --user restart voxtype.service
+  systemctl --user enable omatype.service
+  systemctl --user restart omatype.service
   print_success "OmaType daemon enabled and started"
 }
 
@@ -134,6 +150,7 @@ install_plugin() {
 }
 
 print_header "Installing OmaType"
+remove_upstream_voxtype
 install_dependencies
 install_binary
 install_model

@@ -32,7 +32,7 @@ Panel {
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
   function commandFor(args) {
-    return [String(settings.command || "voxtype")].concat(args)
+    return [String(settings.command || "omatype")].concat(args)
   }
 
   function refreshStatus() {

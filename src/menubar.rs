@@ -490,7 +490,7 @@ fn build_menu(config: &Config) -> (Menu, MenuItem) {
 /// This should be called from the main thread
 /// Note: This function never returns (runs the macOS event loop)
 pub fn run(state_file: PathBuf) -> ! {
-    println!("Starting Voxtype menu bar...");
+    println!("Starting OmaType menu bar...");
     println!("State file: {}", state_file.display());
 
     // Single instance check
@@ -528,7 +528,7 @@ pub fn run(state_file: PathBuf) -> ! {
 
     // Create tray icon
     let tray = TrayIconBuilder::new()
-        .with_tooltip("Voxtype")
+        .with_tooltip("OmaType")
         .with_title(initial_state.icon())
         .with_menu(Box::new(menu))
         .build()
@@ -591,7 +591,7 @@ pub fn run(state_file: PathBuf) -> ! {
                 menu_ids::ENGINE_PARAKEET => {
                     if set_engine(TranscriptionEngine::Parakeet) {
                         notify(
-                            "Voxtype",
+                            "OmaType",
                             "Switched to Parakeet engine. Restart daemon to apply.",
                         );
                     }
@@ -599,7 +599,7 @@ pub fn run(state_file: PathBuf) -> ! {
                 menu_ids::ENGINE_WHISPER => {
                     if set_engine(TranscriptionEngine::Whisper) {
                         notify(
-                            "Voxtype",
+                            "OmaType",
                             "Switched to Whisper engine. Restart daemon to apply.",
                         );
                     }
@@ -609,7 +609,7 @@ pub fn run(state_file: PathBuf) -> ! {
                 menu_ids::HOTKEY_PTT => {
                     if set_hotkey_mode(ActivationMode::PushToTalk) {
                         notify(
-                            "Voxtype",
+                            "OmaType",
                             "Switched to push-to-talk mode. Restart daemon to apply.",
                         );
                     }
@@ -617,7 +617,7 @@ pub fn run(state_file: PathBuf) -> ! {
                 menu_ids::HOTKEY_TOGGLE => {
                     if set_hotkey_mode(ActivationMode::Toggle) {
                         notify(
-                            "Voxtype",
+                            "OmaType",
                             "Switched to toggle mode. Restart daemon to apply.",
                         );
                     }
@@ -626,17 +626,17 @@ pub fn run(state_file: PathBuf) -> ! {
                 // Output mode
                 menu_ids::OUTPUT_TYPE => {
                     if set_output_mode(OutputMode::Type) {
-                        notify("Voxtype", "Output mode: Type text");
+                        notify("OmaType", "Output mode: Type text");
                     }
                 }
                 menu_ids::OUTPUT_CLIPBOARD => {
                     if set_output_mode(OutputMode::Clipboard) {
-                        notify("Voxtype", "Output mode: Copy to clipboard");
+                        notify("OmaType", "Output mode: Copy to clipboard");
                     }
                 }
                 menu_ids::OUTPUT_PASTE => {
                     if set_output_mode(OutputMode::Paste) {
-                        notify("Voxtype", "Output mode: Clipboard + Paste");
+                        notify("OmaType", "Output mode: Clipboard + Paste");
                     }
                 }
 
@@ -645,12 +645,12 @@ pub fn run(state_file: PathBuf) -> ! {
                     if is_autostart_enabled() {
                         // Disable
                         if voxtype_cmd_wait(&["setup", "launchd", "--uninstall"]) {
-                            notify("Voxtype", "Auto-start disabled");
+                            notify("OmaType", "Auto-start disabled");
                         }
                     } else {
                         // Enable
                         if voxtype_cmd_wait(&["setup", "launchd"]) {
-                            notify("Voxtype", "Auto-start enabled");
+                            notify("OmaType", "Auto-start enabled");
                         }
                     }
                 }
@@ -678,7 +678,7 @@ pub fn run(state_file: PathBuf) -> ! {
                     open_path(log_path.to_str().unwrap_or(""));
                 }
                 menu_ids::RESTART_DAEMON => {
-                    notify("Voxtype", "Restarting daemon...");
+                    notify("OmaType", "Restarting daemon...");
                     restart_daemon();
                 }
 
@@ -693,7 +693,7 @@ pub fn run(state_file: PathBuf) -> ! {
                     let model_name = id.strip_prefix(menu_ids::MODEL_PREFIX).unwrap_or("");
                     let is_parakeet = model_name.contains("parakeet");
                     if set_model(model_name, is_parakeet) {
-                        notify("Voxtype", &format!("Switched to model: {}", model_name));
+                        notify("OmaType", &format!("Switched to model: {}", model_name));
                     }
                 }
 

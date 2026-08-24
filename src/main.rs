@@ -1,8 +1,8 @@
-//! Voxtype - Push-to-talk voice-to-text for Linux
+//! OmaType - Local voice-to-text for Omarchy and Linux
 //!
-//! Run with `voxtype` or `voxtype daemon` to start the daemon.
-//! Use `voxtype setup` to check dependencies and download models.
-//! Use `voxtype transcribe <file>` to transcribe an audio file.
+//! Run with `omatype` or `omatype daemon` to start the daemon.
+//! Use `omatype setup` to check dependencies and download models.
+//! Use `omatype transcribe <file>` to transcribe an audio file.
 
 use clap::Parser;
 use std::path::PathBuf;
@@ -29,16 +29,16 @@ fn warn_if_root(command_name: &str) -> bool {
     let is_root = unsafe { libc::getuid() } == 0;
     if is_root {
         eprintln!(
-            "Warning: Running 'voxtype setup {}' as root is not recommended.",
+            "Warning: Running 'omatype setup {}' as root is not recommended.",
             command_name
         );
         eprintln!("  - Models will download to /root/.local/share/voxtype/ instead of your user directory");
         eprintln!(
             "  - Config changes will apply to /root/.config/voxtype/ instead of your user config"
         );
-        eprintln!("  - Cannot restart your user's voxtype daemon from root");
+        eprintln!("  - Cannot restart your user's OmaType daemon from root");
         eprintln!();
-        eprintln!("Run without sudo: voxtype setup {}", command_name);
+        eprintln!("Run without sudo: omatype setup {}", command_name);
         eprintln!();
     }
     is_root
@@ -125,7 +125,7 @@ async fn main() -> anyhow::Result<()> {
             );
             // Send desktop notification
             voxtype::notification::send_sync(
-                "Voxtype: Invalid Model",
+                "OmaType: Invalid Model",
                 &format!("Unknown model '{}', using '{}'", model, default_model),
             );
         }
@@ -811,7 +811,7 @@ async fn first_launch_setup(_config: &config::Config) {
         let _ = std::process::Command::new("osascript")
             .args([
                 "-e",
-                "display notification \"Downloading speech model (this may take a minute)...\" with title \"Voxtype\"",
+                "display notification \"Downloading speech model (this may take a minute)...\" with title \"OmaType\"",
             ])
             .status();
 
@@ -838,14 +838,14 @@ async fn first_launch_setup(_config: &config::Config) {
                 let _ = std::process::Command::new("osascript")
                     .args([
                         "-e",
-                        "display notification \"Ready! Press fn to start recording.\" with title \"Voxtype\"",
+                        "display notification \"Ready! Press fn to start recording.\" with title \"OmaType\"",
                     ])
                     .status();
             }
             Err(e) => {
                 tracing::error!("Failed to download model: {}", e);
                 let msg = format!(
-                    "display notification \"Model download failed: {}. Run 'voxtype setup model' to try again.\" with title \"Voxtype\"",
+                    "display notification \"Model download failed: {}. Run 'omatype setup model' to try again.\" with title \"OmaType\"",
                     e.to_string().replace('"', "'")
                 );
                 let _ = std::process::Command::new("osascript")
@@ -859,7 +859,7 @@ async fn first_launch_setup(_config: &config::Config) {
 /// Check for updates by comparing version with GitHub releases
 async fn check_for_updates() -> anyhow::Result<()> {
     let current = env!("CARGO_PKG_VERSION");
-    println!("Voxtype Update Check\n");
+    println!("OmaType Update Check\n");
     println!("====================\n");
     println!("Current version: {}", current);
     println!("Checking for updates...\n");
@@ -948,8 +948,8 @@ fn check_daemon_running() -> anyhow::Result<()> {
     let pid_file = daemon_pid_file_path();
 
     if !pid_file.exists() {
-        eprintln!("Error: Voxtype daemon is not running.");
-        eprintln!("Start it with: voxtype daemon");
+        eprintln!("Error: OmaType daemon is not running.");
+        eprintln!("Start it with: omatype daemon");
         std::process::exit(1);
     }
 
@@ -965,8 +965,8 @@ fn check_daemon_running() -> anyhow::Result<()> {
     if unsafe { libc::kill(pid, 0) } != 0 {
         // Process doesn't exist, clean up stale PID file
         let _ = std::fs::remove_file(&pid_file);
-        eprintln!("Error: Voxtype daemon is not running (stale PID file removed).");
-        eprintln!("Start it with: voxtype daemon");
+        eprintln!("Error: OmaType daemon is not running (stale PID file removed).");
+        eprintln!("Start it with: omatype daemon");
         std::process::exit(1);
     }
 
@@ -985,8 +985,8 @@ fn send_record_command(
     let pid_file = daemon_pid_file_path();
 
     if !pid_file.exists() {
-        eprintln!("Error: Voxtype daemon is not running.");
-        eprintln!("Start it with: voxtype daemon");
+        eprintln!("Error: OmaType daemon is not running.");
+        eprintln!("Start it with: omatype daemon");
         std::process::exit(1);
     }
 
@@ -1002,8 +1002,8 @@ fn send_record_command(
     if unsafe { libc::kill(pid, 0) } != 0 {
         // Process doesn't exist, clean up stale PID file
         let _ = std::fs::remove_file(&pid_file);
-        eprintln!("Error: Voxtype daemon is not running (stale PID file removed).");
-        eprintln!("Start it with: voxtype daemon");
+        eprintln!("Error: OmaType daemon is not running (stale PID file removed).");
+        eprintln!("Start it with: omatype daemon");
         std::process::exit(1);
     }
 
@@ -1291,7 +1291,15 @@ impl ExtendedStatusInfo {
         } else if let Some(pb) = setup::parakeet::detect_current_parakeet_backend() {
             pb.display_name().to_string()
         } else {
-            "unknown".to_string()
+            // Source-built OmaType installs do not have the upstream package's
+            // variant symlinks to inspect. Report the runtime family instead
+            // of presenting a healthy native build as unknown.
+            match config.engine {
+                config::TranscriptionEngine::Whisper => "CPU (native)",
+                config::TranscriptionEngine::Soniox => "Cloud (Soniox)",
+                _ => "ONNX CPU (native)",
+            }
+            .to_string()
         };
 
         Self {
@@ -1500,8 +1508,8 @@ fn format_state_json(
         "recording" => (&icons.recording, "Recording..."),
         "streaming" => (&icons.streaming, "Streaming live..."),
         "transcribing" => (&icons.transcribing, "Transcribing..."),
-        "idle" => (&icons.idle, "Voxtype ready - hold hotkey to record"),
-        "stopped" => (&icons.stopped, "Voxtype not running"),
+        "idle" => (&icons.idle, "OmaType ready - hold hotkey to record"),
+        "stopped" => (&icons.stopped, "OmaType not running"),
         _ => (&icons.idle, "Unknown state"),
     };
 
@@ -1617,7 +1625,7 @@ fn run_info_command(action: InfoAction) -> anyhow::Result<()> {
 fn print_variants_text(inv: &setup::binary::Inventory) {
     use setup::binary::InstallKind;
 
-    println!("Voxtype install");
+    println!("OmaType install");
     println!("  Binary:        {}", inv.binary_path.display());
     println!(
         "  Install kind:  {}",
