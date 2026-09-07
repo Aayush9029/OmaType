@@ -14,6 +14,7 @@
   <br>
   <img src="assets/omatype-waveform.png" width="390" alt="OmaType floating live dictation waveform">
   <img src="assets/omatype-recording-bar.png" width="390" alt="OmaType batch recording bar with elapsed time and waveform">
+  <img src="assets/omatype-processing.png" width="390" alt="OmaType monochrome capsule with dotted processing helix">
 </p>
 
 ## How it works
@@ -24,7 +25,7 @@
 | Hold Home for 2 seconds | Type live until Home is released. |
 | Delete | Cancel the active recording. |
 
-Recording begins on key-down, so a hold keeps the opening words. The floating bar shows mic activity, elapsed time, and processing; the menu-bar icon opens history and models.
+Recording begins on key-down, so a hold keeps the opening words. A monochrome floating capsule shows mic activity and elapsed time, then transitions to a dotted helix while processing. The menu-bar icon opens history and models.
 
 ## Install
 
@@ -48,6 +49,17 @@ The installer builds OmaType, downloads the ~633 MB INT8 Parakeet model, enables
 
 Missing models download from the panel. The active model stays warm, and the newest 200 transcripts are kept locally without recorded audio.
 
+## Preview the capsule
+
+With Quickshell installed, run from the repository:
+
+```bash
+qs -p contrib/omarchy/omatype/preview.qml
+```
+
+The preview cycles through recording, live dictation, and processing using simulated audio levels. It does not access the microphone and closes after 90 seconds. The live plugin uses the same capsule component.
+
 ## Credits
 
 Built on Peter Jackson's MIT-licensed [Voxtype](https://github.com/peteonrails/voxtype).
+Capsule design inspired by [Petal](https://github.com/Aayush9029/petal).

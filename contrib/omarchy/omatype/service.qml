@@ -3,7 +3,6 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 import qs.Commons
-import qs.Ui
 
 Item {
   id: root
@@ -16,17 +15,10 @@ Item {
   property int elapsedSeconds: 0
   property double lastVisualSampleMs: -1
   property real pendingVisualPeak: 0
-  property real processingPhase: 0
 
   readonly property bool active: daemonState === "recording"
     || daemonState === "streaming"
     || daemonState === "transcribing"
-  readonly property color stateColor: daemonState === "streaming"
-    ? Color.accent
-    : (daemonState === "transcribing" ? "#fbbf24" : "#fb7185")
-  readonly property string stateLabel: daemonState === "streaming"
-    ? "LIVE DICTATION"
-    : (daemonState === "transcribing" ? "POLISHING" : "LISTENING")
   function updateState(raw) {
     try {
       const data = JSON.parse(String(raw || "{}"))
@@ -77,7 +69,6 @@ Item {
       pendingVisualPeak = 0
       while (next.length > 46) next.shift()
       samples = next
-      wave.requestPaint()
     } catch (error) {}
   }
 
@@ -101,7 +92,7 @@ Item {
 
   Timer {
     interval: 1000
-    running: root.active
+    running: root.daemonState === "recording" || root.daemonState === "streaming"
     repeat: true
     onTriggered: {
       root.elapsedSeconds = root.startedAt > 0
@@ -110,23 +101,9 @@ Item {
     }
   }
 
-  function formatElapsed(value) {
-    return Math.floor(value / 60) + ":" + String(value % 60).padStart(2, "0")
-  }
-
-  NumberAnimation on processingPhase {
-    from: 0
-    to: Math.PI * 2
-    duration: 1500
-    loops: Animation.Infinite
-    running: root.daemonState === "transcribing"
-  }
-
-  onProcessingPhaseChanged: wave.requestPaint()
-
   PanelWindow {
     id: window
-    visible: root.active
+    visible: root.active || card.opacity > 0
     anchors { top: true; bottom: true; left: true; right: true }
     color: "transparent"
     exclusionMode: ExclusionMode.Ignore
@@ -135,139 +112,21 @@ Item {
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
     mask: Region {}
 
-    BorderSurface {
+    FloatingCapsule {
       id: card
-      width: Style.space(356)
-      height: Style.space(64)
+      daemonState: root.daemonState
+      samples: root.samples
+      elapsedSeconds: root.elapsedSeconds
+      uiScale: Style.space(100) / 100
+      fontFamily: Style.font.family
       anchors.horizontalCenter: parent.horizontalCenter
       anchors.bottom: parent.bottom
       anchors.bottomMargin: Style.space(68)
-      color: Util.alpha(Color.background, 0.96)
-      borderSpec: Border.surfaceSpec("popups", "border", root.stateColor, Math.max(1, Style.space(2)))
-      radius: Style.cornerRadius
-
-      Row {
-        anchors.fill: parent
-        anchors.margins: Style.space(12)
-        spacing: Style.space(10)
-
-        Rectangle {
-          width: Style.space(38)
-          height: width
-          anchors.verticalCenter: parent.verticalCenter
-          radius: width / 2
-          color: Util.alpha(root.stateColor, root.voiceActive ? 0.24 : 0.12)
-
-          Text {
-            anchors.centerIn: parent
-            text: root.daemonState === "transcribing" ? "󰔟" : "󰍬"
-            color: root.stateColor
-            font.family: "JetBrainsMono Nerd Font"
-            font.pixelSize: Style.font.display
-          }
-
-          SequentialAnimation on scale {
-            running: root.voiceActive && root.daemonState !== "transcribing"
-            loops: Animation.Infinite
-            NumberAnimation { to: 1.08; duration: 180; easing.type: Easing.OutCubic }
-            NumberAnimation { to: 1.0; duration: 260; easing.type: Easing.InCubic }
-          }
-        }
-
-        Column {
-          width: Style.space(88)
-          anchors.verticalCenter: parent.verticalCenter
-          spacing: Style.space(2)
-
-          Text {
-            text: root.stateLabel
-            color: root.stateColor
-            font.family: Style.font.family
-            font.pixelSize: Style.font.caption
-            font.bold: true
-          }
-          Text {
-            id: elapsedText
-            text: root.formatElapsed(root.elapsedSeconds)
-            color: Color.popups.text
-            font.family: Style.font.family
-            font.pixelSize: Style.font.body
-            font.bold: true
-          }
-        }
-
-        Canvas {
-          id: wave
-          width: Style.space(184)
-          height: Style.space(36)
-          anchors.verticalCenter: parent.verticalCenter
-
-          onPaint: {
-            const ctx = getContext("2d")
-            ctx.clearRect(0, 0, width, height)
-            const center = height / 2
-            if (root.daemonState === "transcribing") {
-              const points = 34
-              const step = width / (points - 1)
-              const amplitude = center - 5
-
-              // Draw alternating rungs first so the two moving strands sit
-              // crisply on top, like the processing helix in Petal.
-              ctx.lineCap = "round"
-              ctx.lineWidth = 1.5
-              for (let i = 0; i < points; i += 2) {
-                const angle = i * 0.52 + root.processingPhase
-                const y1 = center + Math.sin(angle) * amplitude
-                const y2 = center - Math.sin(angle) * amplitude
-                const depth = 0.18 + Math.abs(Math.cos(angle)) * 0.42
-                ctx.strokeStyle = Util.alpha(root.stateColor, depth)
-                ctx.beginPath()
-                ctx.moveTo(i * step, y1)
-                ctx.lineTo(i * step, y2)
-                ctx.stroke()
-              }
-
-              for (let strand = -1; strand <= 1; strand += 2) {
-                ctx.strokeStyle = strand < 0
-                  ? Util.alpha(root.stateColor, 0.52)
-                  : root.stateColor
-                ctx.lineWidth = strand < 0 ? 2 : 2.5
-                ctx.beginPath()
-                for (let i = 0; i < points; i++) {
-                  const angle = i * 0.52 + root.processingPhase
-                  const x = i * step
-                  const y = center + strand * Math.sin(angle) * amplitude
-                  if (i === 0) ctx.moveTo(x, y)
-                  else ctx.lineTo(x, y)
-                }
-                ctx.stroke()
-              }
-              return
-            }
-
-            const values = root.samples
-            const count = 46
-            const gap = 2
-            const barWidth = Math.max(1.5, (width - gap * (count - 1)) / count)
-            const offset = count - values.length
-
-            ctx.lineCap = "round"
-            for (let i = 0; i < count; i++) {
-              const value = i < offset ? 0 : Number(values[i - offset] || 0)
-              const strength = Math.min(1, Math.sqrt(value) * 2.1)
-              const half = Math.max(1.5, strength * (center - 2))
-              const x = i * (barWidth + gap) + barWidth / 2
-              ctx.strokeStyle = i >= count - 4
-                ? root.stateColor
-                : Util.alpha(Color.popups.text, 0.30 + strength * 0.58)
-              ctx.lineWidth = barWidth
-              ctx.beginPath()
-              ctx.moveTo(x, center - half)
-              ctx.lineTo(x, center + half)
-              ctx.stroke()
-            }
-          }
-        }
+      opacity: root.active ? 1 : 0
+      scale: root.active ? 1 : 0.94
+      Behavior on opacity { NumberAnimation { duration: 150 } }
+      Behavior on scale {
+        NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
       }
     }
   }
