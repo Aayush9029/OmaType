@@ -53,7 +53,12 @@ ShellRoot {
     WlrLayershell.namespace: "omatype-capsule-preview"
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
-    mask: Region {}
+    mask: Region {
+      x: artwork.x + capsule.x
+      y: artwork.y + capsule.y
+      width: capsule.width
+      height: capsule.height
+    }
 
     Item {
       id: artwork
@@ -68,7 +73,8 @@ ShellRoot {
         anchors.centerIn: parent
         daemonState: preview.stage
         samples: preview.samples
-        elapsedSeconds: Math.floor(preview.ticks / 25)
+        onStopRequested: { preview.cycling = false; preview.stage = "transcribing" }
+        onDiscardRequested: { preview.cycling = false; preview.stage = "idle" }
         visible: active
       }
     }

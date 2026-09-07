@@ -13,8 +13,9 @@
   <img src="assets/omatype-panel.png" width="390" alt="OmaType transcript history panel for Omarchy">
   <br>
   <img src="assets/omatype-waveform.png" width="390" alt="OmaType floating live dictation waveform">
-  <img src="assets/omatype-recording-bar.png" width="390" alt="OmaType batch recording bar with elapsed time and waveform">
-  <img src="assets/omatype-processing.png" width="390" alt="OmaType monochrome capsule with dotted processing helix">
+  <img src="assets/omatype-recording-bar.png" width="390" alt="OmaType compact red recording waveform">
+  <img src="assets/omatype-processing.png" width="390" alt="OmaType capsule with a neutral dotted processing helix">
+  <img src="assets/omatype-hover.png" width="390" alt="OmaType icon-only stop and discard controls on hover">
 </p>
 
 ## How it works
@@ -25,7 +26,7 @@
 | Hold Home for 2 seconds | Type live until Home is released. |
 | Delete | Cancel the active recording. |
 
-Recording begins on key-down, so a hold keeps the opening words. A monochrome floating capsule shows mic activity and elapsed time, then transitions to a dotted helix while processing. The menu-bar icon opens history and models.
+Recording begins on key-down, so a hold keeps the opening words. A compact floating capsule shows a red waveform that brightens toward white at louder peaks. While processing, only a neutral dotted helix remains. Hover during recording to reveal stop/transcribe and discard controls. Click discard again to confirm, or move away to keep recording. The menu-bar icon opens history and models.
 
 ## Install
 
@@ -58,6 +59,12 @@ qs -p contrib/omarchy/omatype/preview.qml
 ```
 
 The preview cycles through recording, live dictation, and processing using simulated audio levels. It does not access the microphone and closes after 90 seconds. The live plugin uses the same capsule component.
+
+Run the hover/action checks with Qt's test runner:
+
+```bash
+QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qmltestrunner -input testing/omatype-capsule
+```
 
 ## Credits
 

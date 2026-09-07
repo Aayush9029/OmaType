@@ -9,10 +9,6 @@ Item {
 
   property string daemonState: "idle"
   property var samples: []
-  property real peak: 0
-  property bool voiceActive: false
-  property double startedAt: 0
-  property int elapsedSeconds: 0
   property double lastVisualSampleMs: -1
   property real pendingVisualPeak: 0
 
@@ -26,19 +22,13 @@ Item {
       if (next !== daemonState) {
         if ((next === "recording" || next === "streaming")
             && daemonState !== "recording" && daemonState !== "streaming") {
-          startedAt = Date.now()
-          elapsedSeconds = 0
           lastVisualSampleMs = -1
           pendingVisualPeak = 0
           samples = []
         } else if (next === "idle" || next === "stopped") {
-          startedAt = 0
-          elapsedSeconds = 0
           lastVisualSampleMs = -1
           pendingVisualPeak = 0
           samples = []
-          peak = 0
-          voiceActive = false
         }
         daemonState = next
       }
@@ -55,8 +45,6 @@ Item {
       if (typeof data.peak !== "number") return
       const nextPeak = Math.max(0, Math.min(1, Number(data.peak)))
       const sampleMs = Number(data.ts_ms || 0)
-      peak = nextPeak
-      voiceActive = !!data.vad
       pendingVisualPeak = Math.max(pendingVisualPeak, nextPeak)
 
       // The daemon publishes at 100 Hz, which makes a 46-bar history race
@@ -90,16 +78,13 @@ Item {
     }
   }
 
-  Timer {
-    interval: 1000
-    running: root.daemonState === "recording" || root.daemonState === "streaming"
-    repeat: true
-    onTriggered: {
-      root.elapsedSeconds = root.startedAt > 0
-        ? Math.max(0, Math.floor((Date.now() - root.startedAt) / 1000))
-        : 0
-    }
+  function requestAction(action) {
+    if (!active || daemonState === "transcribing" || actionProc.running) return
+    actionProc.command = ["omatype", "record", action]
+    actionProc.running = true
   }
+
+  Process { id: actionProc }
 
   PanelWindow {
     id: window
@@ -110,15 +95,17 @@ Item {
     WlrLayershell.namespace: "omatype-waveform"
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
-    mask: Region {}
+    // Only the capsule accepts pointer input; the desktop stays interactive.
+    mask: Region { item: card }
 
     FloatingCapsule {
       id: card
       daemonState: root.daemonState
       samples: root.samples
-      elapsedSeconds: root.elapsedSeconds
+      controlsEnabled: !actionProc.running
+      onStopRequested: root.requestAction("stop")
+      onDiscardRequested: root.requestAction("cancel")
       uiScale: Style.space(100) / 100
-      fontFamily: Style.font.family
       anchors.horizontalCenter: parent.horizontalCenter
       anchors.bottom: parent.bottom
       anchors.bottomMargin: Style.space(68)
