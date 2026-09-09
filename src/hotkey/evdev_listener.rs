@@ -172,7 +172,10 @@ impl DeviceManager {
         // Watch /dev/input for device creation and deletion
         inotify
             .watches()
-            .add("/dev/input", WatchMask::CREATE | WatchMask::DELETE)
+            .add(
+                "/dev/input",
+                WatchMask::CREATE | WatchMask::DELETE | WatchMask::ATTRIB,
+            )
             .map_err(|e| HotkeyError::DeviceAccess(format!("Failed to watch /dev/input: {}", e)))?;
 
         let mut manager = Self {
@@ -186,7 +189,7 @@ impl DeviceManager {
         manager.enumerate_devices()?;
 
         if manager.devices.is_empty() {
-            return Err(HotkeyError::NoKeyboard);
+            tracing::warn!("No accessible keyboard. Waiting for a device or input permissions; check keyboard access in OmaType settings.");
         }
 
         Ok(manager)
@@ -294,7 +297,10 @@ impl DeviceManager {
                 if name_str.starts_with("event") {
                     let path = PathBuf::from("/dev/input").join(&*name_str);
 
-                    if event.mask.contains(inotify::EventMask::CREATE) {
+                    if event
+                        .mask
+                        .intersects(inotify::EventMask::CREATE | inotify::EventMask::ATTRIB)
+                    {
                         tracing::debug!("Device created: {:?}", path);
                         changed = true;
                     } else if event.mask.contains(inotify::EventMask::DELETE) {
@@ -481,7 +487,7 @@ fn evdev_listener_loop(
 
         // If no devices, try to find some
         if !manager.has_devices() {
-            tracing::warn!("No keyboard devices available, waiting...");
+            tracing::debug!("No accessible keyboard devices, waiting...");
             std::thread::sleep(Duration::from_secs(1));
             if let Err(e) = manager.enumerate_devices() {
                 tracing::debug!("Enumeration failed: {}", e);
@@ -609,7 +615,7 @@ fn evdev_listener_loop(
 }
 
 /// Parse a key name string to evdev Key
-fn parse_key_name(name: &str) -> Result<Key, HotkeyError> {
+pub(crate) fn parse_key_name(name: &str) -> Result<Key, HotkeyError> {
     let trimmed = name.trim();
 
     // Try parsing as a prefixed numeric keycode (e.g. "wev_234", "evtest_226")

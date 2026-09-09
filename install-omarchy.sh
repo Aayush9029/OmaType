@@ -110,6 +110,15 @@ install_config() {
   fi
 }
 
+install_keyboard_access() {
+  print_status "Setting up keyboard access for the active desktop session"
+  if [[ -t 0 ]]; then
+    sudo "$ROOT_DIR/contrib/omarchy/install-keyboard-access.sh"
+  else
+    pkexec "$ROOT_DIR/contrib/omarchy/install-keyboard-access.sh"
+  fi
+}
+
 install_service() {
   mkdir -p "$SERVICE_DIR"
   local service_file="$SERVICE_DIR/omatype.service"
@@ -160,11 +169,13 @@ install_dependencies
 install_binary
 install_model
 install_config
+install_keyboard_access
 install_service
 install_plugin
 
 printf '\n'
 print_success "OmaType is ready"
+print_dim "Click the microphone in the bar, then Settings to change your hotkey."
 print_dim "Tap Home to begin/end an accurate recording. Hold Home for two seconds to type live."
 if ! grep -Eq '^[[:space:]]*home[[:space:]]*=[[:space:]]*f13([[:space:]]|$)' /etc/keyd/default.conf 2>/dev/null; then
   print_warning "Map Home to F13 in keyd so the trigger does not also reach focused applications."

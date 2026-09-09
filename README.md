@@ -25,4 +25,8 @@ cd OmaType
 
 Tap **Home** to start/stop. Hold for live dictation. **Delete** to cancel.
 
+Click the microphone in the bar → **Settings** to change the hotkey and recording mode, then **Save and apply**. Home is mapped to **F13** by keyd, so keep F13 selected to use Home. **All settings…** opens the full configuration editor; you can also run `omatype configure`.
+
+The installer sets up keyboard access for the active desktop session. If the shortcut stops responding, Settings shows whether keyboard access is missing.
+
 Built on [Voxtype](https://github.com/peteonrails/voxtype). Design and demo from [Petal](https://github.com/Aayush9029/petal).

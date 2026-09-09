@@ -5,6 +5,7 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
+import qs.Ui as Ui
 
 Panel {
   id: root
@@ -22,6 +23,92 @@ Panel {
   property bool showingModels: false
   property string pendingModel: ""
   property string modelError: ""
+  property bool showingSettings: false
+  property var hotkey: ({ key: "", mode: "hybrid", enabled: true, keyboard_access: true })
+  property string draftMode: "hybrid"
+  property bool draftEnabled: true
+  property string settingsMessage: ""
+  property bool settingsFailed: false
+  property bool hotkeyLoaded: false
+  readonly property bool settingsBusy: saveHotkeyProc.running || applyHotkeyProc.running
+  readonly property string hotkeyLabel: String(hotkey.key || "hotkey")
+
+  function refreshHotkey() {
+    if (hotkeyProc.running) return
+    hotkeyProc.command = commandFor(["config", "hotkey"])
+    hotkeyProc.running = true
+  }
+
+  function openSettings() {
+    open()
+    showingModels = false
+    showingSettings = true
+    settingsMessage = ""
+    settingsFailed = false
+    refreshHotkey()
+    Qt.callLater(function() { hotkeyField.forceActiveFocus() })
+  }
+
+  function saveHotkey() {
+    if (busy || settingsBusy || !hotkeyLoaded) return
+    settingsMessage = ""
+    settingsFailed = false
+    saveHotkeyProc.command = commandFor(["config", "hotkey", "--key", hotkeyField.text.trim(),
+      "--mode", draftMode, "--enabled", String(draftEnabled)])
+    saveHotkeyProc.running = true
+  }
+
+  Process {
+    id: hotkeyProc
+    stdout: StdioCollector {
+      onStreamFinished: {
+        try {
+          root.hotkey = JSON.parse(text)
+          hotkeyField.text = root.hotkey.key
+          root.draftMode = root.hotkey.mode
+          root.draftEnabled = root.hotkey.enabled
+          root.hotkeyLoaded = true
+        } catch (error) {
+          root.settingsFailed = true
+          root.settingsMessage = "Could not read hotkey settings"
+        }
+      }
+    }
+    onExited: function(code) {
+      if (code !== 0) {
+        root.hotkeyLoaded = false
+        root.settingsFailed = true
+        root.settingsMessage = "Could not read hotkey settings. Update the OmaType binary."
+      }
+    }
+  }
+
+  Process {
+    id: saveHotkeyProc
+    stderr: StdioCollector {
+      onStreamFinished: if (text.trim()) root.settingsMessage = text.trim()
+    }
+    onExited: function(code) {
+      if (code !== 0) {
+        root.settingsFailed = true
+        if (!root.settingsMessage) root.settingsMessage = "Could not save settings"
+        return
+      }
+      root.refreshHotkey()
+      applyHotkeyProc.running = true
+    }
+  }
+
+  Process {
+    id: applyHotkeyProc
+    command: ["systemctl", "--user", "restart", "omatype.service"]
+    onExited: function(code) {
+      root.settingsFailed = code !== 0
+      root.settingsMessage = code === 0 ? "Saved and applied" : "Saved, but OmaType could not restart"
+      root.refreshStatus()
+    }
+  }
+
 
   readonly property var modelOptions: [
     {
@@ -47,7 +134,7 @@ Panel {
   readonly property bool ready: state !== "stopped"
   readonly property bool busy: recording || working
   readonly property color foreground: bar ? bar.foreground : Color.foreground
-  readonly property color muted: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.58)
+  readonly property color muted: Qt.darker(foreground, 1.4)
   readonly property color faint: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.08)
   readonly property color accent: recording ? "#fb7185" : (working ? "#fbbf24" : Color.accent)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
@@ -127,10 +214,13 @@ Panel {
 
   function stateDetail() {
     if (lastError !== "") return lastError
-    if (recording) return state === "streaming" ? "Release Home to finish" : "Tap Home again to finish"
+    if (recording) return state === "streaming" || hotkey.mode === "push_to_talk" ? "Release " + hotkeyLabel + " to finish" : "Tap " + hotkeyLabel + " again to finish"
     if (working) return "OmaType is processing the complete recording"
     var model = String(status.model || "")
-    return model !== "" ? model : "Tap Home for batch · hold for live"
+    for (var i = 0; i < modelOptions.length; i++) {
+      if (modelIsActive(modelOptions[i])) return modelOptions[i].title + " · " + modelOptions[i].languages
+    }
+    return model !== "" ? model : "Press " + hotkeyLabel + " to dictate"
   }
 
   function durationText(seconds) {
@@ -178,6 +268,7 @@ Panel {
   Component.onCompleted: {
     refreshStatus()
     refreshHistory()
+    refreshHotkey()
   }
 
   onOpenedChanged: if (opened) {
@@ -185,6 +276,8 @@ Panel {
     selectedEntry = 0
     pendingDeleteId = ""
     showingModels = false
+    showingSettings = false
+    refreshHotkey()
     refreshStatus()
     refreshHistory()
     Qt.callLater(function() {
@@ -298,7 +391,8 @@ Panel {
     function show(): void { root.open() }
     function hide(): void { root.close() }
     function toggle(): void { root.toggle() }
-    function models(): void { root.showingModels = true; root.open() }
+    function models(): void { root.open(); root.showingModels = true; root.showingSettings = false }
+    function settings(): void { root.openSettings() }
     function refresh(): string { root.refreshStatus(); root.refreshHistory(); return "ok" }
     function record(): string { root.toggleRecording(); return "ok" }
   }
@@ -309,7 +403,7 @@ Panel {
     bar: root.bar
     text: root.recording ? "󰑊" : (root.working ? "󰔟" : "󰍬")
     fontFamily: "JetBrainsMono Nerd Font"
-    foreground: root.muted
+    foreground: root.foreground
     activeColor: root.accent
     active: root.busy
     tooltipText: root.stateTitle() + "\n" + root.stateDetail()
@@ -327,12 +421,13 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(390))
-    contentHeight: panel.fittedContentHeight(content.implicitHeight, Style.space(590))
+    contentWidth: panel.fittedContentWidth(Style.space(380))
+    contentHeight: panel.fittedContentHeight(content.implicitHeight, Style.space(720))
 
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
+      blocked: root.showingSettings
       onMoveRequested: function(dx, dy) {
         if (root.showingModels) return
         if (root.historyEntries.length === 0 || dy === 0) return
@@ -344,6 +439,7 @@ Panel {
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(text) {
+        if (text === "s" || text === "S") { root.openSettings(); return }
         if (root.showingModels) return
         if ((text === "d" || text === "D") && root.historyEntries.length > 0)
           root.requestDelete(root.historyEntries[root.selectedEntry])
@@ -355,76 +451,185 @@ Panel {
       Column {
         id: content
         width: parent.width
-        spacing: Style.space(12)
+        spacing: Style.space(14)
 
         PanelHero {
           width: parent.width
           title: "OmaType"
-          meta: root.stateTitle()
+          meta: root.showingSettings ? "SETTINGS" : root.stateTitle()
           foreground: root.foreground
           fontFamily: root.fontFamily
           iconOpacity: root.ready ? 1.0 : 0.45
+          trailingControl: Component {
+            PanelActionButton {
+              iconText: root.showingSettings || root.showingModels ? "󰁍" : "󰒓"
+              tooltipText: root.showingSettings || root.showingModels ? "Back to transcripts" : "Settings"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              focusable: root.showingSettings
+              onClicked: {
+                if (root.showingSettings || root.showingModels) {
+                  root.showingSettings = false
+                  root.showingModels = false
+                  keyCatcher.forceActiveFocus()
+                } else root.openSettings()
+              }
+            }
+          }
           iconComponent: Component {
             Text {
               text: root.recording ? "󰑊" : (root.working ? "󰔟" : "󰍬")
-              color: root.accent
+              color: root.busy ? root.accent : root.foreground
               font.family: "JetBrainsMono Nerd Font"
               font.pixelSize: Style.font.display
             }
           }
         }
 
-        Rectangle {
+        PanelSeparator { foreground: root.foreground }
+
+        Column {
+          visible: !root.showingSettings
           width: parent.width
-          implicitHeight: statusColumn.implicitHeight + Style.space(24)
-          radius: Style.space(12)
-          color: root.faint
-
-          Column {
-            id: statusColumn
-            anchors.fill: parent
-            anchors.margins: Style.space(12)
-            spacing: Style.space(5)
-
-            RowLayout {
-              width: parent.width
-              spacing: Style.space(8)
-              Rectangle {
-                width: Style.space(7)
-                height: width
-                radius: width / 2
-                color: root.accent
-              }
-              Text {
-                text: root.stateTitle()
-                color: root.foreground
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.body
-                font.bold: true
-              }
-              Item { Layout.fillWidth: true }
-              Text {
-                text: root.recording ? "LIVE" : (root.working ? "WORKING" : "LOCAL")
-                color: root.accent
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                font.bold: true
-              }
-            }
-
-            Text {
-              width: parent.width
-              text: root.stateDetail()
-              color: root.muted
-              elide: Text.ElideMiddle
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-            }
+          spacing: Style.space(6)
+          Text {
+            width: parent.width
+            text: root.stateDetail()
+            textFormat: Text.PlainText
+            color: root.muted
+            elide: Text.ElideMiddle
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
+          }
+          Text {
+            width: parent.width
+            text: !root.hotkey.enabled ? "Keyboard shortcut disabled"
+              : root.hotkey.keyboard_access === false ? "Keyboard access needed · open Settings"
+              : root.hotkeyLabel + (root.hotkey.mode === "hybrid" ? "  ·  Tap to toggle / hold for live"
+                : root.hotkey.mode === "toggle" ? "  ·  Tap to start / stop" : "  ·  Hold to record")
+            color: root.muted
+            wrapMode: Text.Wrap
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
           }
         }
 
+        Column {
+          id: settingsContent
+          visible: root.showingSettings
+          width: parent.width
+          spacing: Style.space(14)
+          Keys.onEscapePressed: { root.showingSettings = false; keyCatcher.forceActiveFocus() }
+
+          RowLayout {
+            width: parent.width
+            PanelSectionHeader {
+              text: "KEYBOARD SHORTCUT"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              Layout.fillWidth: true
+            }
+            ToggleSwitch {
+              checked: root.draftEnabled
+              foreground: root.foreground
+              enabled: !root.settingsBusy && root.hotkeyLoaded
+              onToggled: root.draftEnabled = !root.draftEnabled
+            }
+          }
+          Ui.TextField {
+            id: hotkeyField
+            width: parent.width
+            placeholderText: "F13, HOME, RIGHTCTRL…"
+            foreground: root.foreground
+            enabled: !root.settingsBusy && root.hotkeyLoaded
+            selectByMouse: true
+            onAccepted: root.saveHotkey()
+          }
+          Text {
+            width: parent.width
+            text: "Enter the key name. If Home is remapped to F13 in keyd, use F13 here."
+            wrapMode: Text.Wrap
+            color: root.muted
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+          PanelSeparator { foreground: root.foreground }
+          PanelSectionHeader {
+            text: "RECORDING MODE"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+          }
+          Column {
+            width: parent.width
+            spacing: Style.space(4)
+            Repeater {
+              model: [
+                {value: "hybrid", title: "Tap to toggle · hold for live"},
+                {value: "toggle", title: "Tap to start / stop"},
+                {value: "push_to_talk", title: "Hold to record"}
+              ]
+              delegate: Ui.Button {
+                required property var modelData
+                width: parent.width
+                text: modelData.title
+                iconText: root.draftMode === modelData.value ? "󰄬" : " "
+                selected: root.draftMode === modelData.value
+                leftAlign: true
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                focusable: true
+                enabled: !root.settingsBusy && root.hotkeyLoaded
+                onClicked: root.draftMode = modelData.value
+              }
+            }
+          }
+          Text {
+            visible: root.hotkey.keyboard_access === false
+            width: parent.width
+            text: "OmaType cannot read your keyboard. Run install-omarchy.sh to set up keyboard access, then restart OmaType."
+            wrapMode: Text.Wrap
+            color: root.muted
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+          PanelSeparator { foreground: root.foreground }
+          Ui.Button {
+            width: parent.width
+            text: root.settingsBusy ? "Applying…" : "Save and apply"
+            iconText: "󰄬"
+            bordered: true
+            focusable: true
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            enabled: !root.busy && !root.settingsBusy && root.hotkeyLoaded && hotkeyField.text.trim() !== ""
+            onClicked: root.saveHotkey()
+          }
+          Text {
+            visible: root.settingsMessage !== "" || root.busy
+            width: parent.width
+            text: root.busy ? "Finish recording before applying settings." : root.settingsMessage
+            textFormat: Text.PlainText
+            wrapMode: Text.Wrap
+            color: root.settingsFailed ? Color.accent : root.muted
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+          Ui.Button {
+            width: parent.width
+            text: "All settings…"
+            iconText: "󰒓"
+            leftAlign: true
+            focusable: true
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            onClicked: { Quickshell.execDetached(["omarchy", "launch", "terminal"].concat(root.commandFor(["configure"]))); root.close() }
+          }
+        }
+
+        PanelSeparator { visible: !root.showingSettings; foreground: root.foreground }
+
         RowLayout {
-          visible: !root.showingModels
+          visible: !root.showingSettings && !root.showingModels
           width: parent.width
           Text {
             text: "RECENT TRANSCRIPTS"
@@ -443,11 +648,11 @@ Panel {
         }
 
         Rectangle {
-          visible: !root.showingModels && root.historyEntries.length === 0
+          visible: !root.showingSettings && !root.showingModels && root.historyEntries.length === 0
           width: parent.width
           implicitHeight: emptyColumn.implicitHeight + Style.space(32)
-          radius: Style.space(12)
-          color: root.faint
+          radius: Style.cornerRadius
+          color: "transparent"
 
           Column {
             id: emptyColumn
@@ -472,7 +677,7 @@ Panel {
 
         Flickable {
           id: historyList
-          visible: !root.showingModels && root.historyEntries.length > 0
+          visible: !root.showingSettings && !root.showingModels && root.historyEntries.length > 0
           width: parent.width
           height: Math.min(historyColumn.implicitHeight, Style.space(330))
           contentHeight: historyColumn.implicitHeight
@@ -493,10 +698,10 @@ Panel {
                 required property int index
                 width: historyColumn.width
                 implicitHeight: transcriptColumn.implicitHeight + Style.space(20)
-                radius: Style.space(10)
+                radius: Style.cornerRadius
                 color: transcriptMouse.containsMouse || (root.cursorActive && root.selectedEntry === index)
                   ? Style.selectedFillFor(root.foreground, Color.accent)
-                  : root.faint
+                  : "transparent"
 
                 Column {
                   id: transcriptColumn
@@ -508,6 +713,7 @@ Panel {
                   spacing: Style.space(4)
 
                   Text {
+                    textFormat: Text.PlainText
                     width: parent.width
                     text: root.normalizedText(transcriptRow.modelData.text)
                     color: root.foreground
@@ -568,7 +774,7 @@ Panel {
         }
 
         RowLayout {
-          visible: !root.showingModels
+          visible: !root.showingSettings && !root.showingModels
           width: parent.width
           spacing: Style.space(8)
 
@@ -590,7 +796,7 @@ Panel {
         }
 
         Column {
-          visible: root.showingModels
+          visible: !root.showingSettings && root.showingModels
           width: parent.width
           spacing: Style.space(8)
 
@@ -633,11 +839,23 @@ Panel {
           }
         }
 
+        Ui.Button {
+          visible: !root.showingModels && !root.showingSettings
+          width: parent.width
+          text: "Settings"
+          iconText: "󰒓"
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+          leftAlign: true
+          onClicked: root.openSettings()
+        }
+
         Text {
+          visible: !root.showingSettings
           width: parent.width
           text: root.showingModels
             ? "Models download locally · switching restarts OmaType"
-            : "Enter copies  ·  D deletes  ·  Esc closes"
+            : "Enter copies  ·  S settings  ·  Esc closes"
           color: root.muted
           horizontalAlignment: Text.AlignHCenter
           font.family: root.fontFamily
@@ -647,33 +865,13 @@ Panel {
     }
   }
 
-  component MiniButton: Rectangle {
+  component MiniButton: PanelActionButton {
+    property alias glyph: mini.iconText
+    property alias tint: mini.foreground
+    property alias tooltip: mini.tooltipText
     id: mini
-    property string glyph: ""
-    property color tint: root.muted
-    property string tooltip: ""
-    signal clicked()
-
-    width: Style.space(28)
-    height: width
-    radius: Style.space(7)
-    color: miniMouse.containsMouse ? root.faint : "transparent"
-
-    Text {
-      anchors.centerIn: parent
-      text: mini.glyph
-      color: mini.tint
-      font.family: "JetBrainsMono Nerd Font"
-      font.pixelSize: Style.font.body
-    }
-    MouseArea {
-      id: miniMouse
-      anchors.fill: parent
-      hoverEnabled: true
-      onClicked: mini.clicked()
-    }
-    ToolTip.visible: miniMouse.containsMouse
-    ToolTip.text: mini.tooltip
+    foreground: root.muted
+    fontFamily: root.fontFamily
   }
 
   component ModelCard: Rectangle {
@@ -683,8 +881,8 @@ Panel {
     readonly property bool installing: root.pendingModel === option.engine + ":" + option.id
 
     implicitHeight: modelContent.implicitHeight + Style.space(20)
-    radius: Style.space(10)
-    color: activeModel ? Style.selectedFillFor(root.foreground, Color.accent) : root.faint
+    radius: Style.cornerRadius
+    color: activeModel ? Style.selectedFillFor(root.foreground, Color.accent) : "transparent"
 
     Column {
       id: modelContent
@@ -736,7 +934,7 @@ Panel {
       anchors.right: parent.right
       anchors.rightMargin: Style.space(10)
       anchors.verticalCenter: parent.verticalCenter
-      radius: Style.space(8)
+      radius: Style.cornerRadius
       color: modelMouse.containsMouse ? Style.selectedFillFor(root.foreground, Color.accent) : "transparent"
       opacity: modelProc.running || restartProc.running ? (modelCard.installing ? 1.0 : 0.35) : 1.0
 
@@ -758,43 +956,12 @@ Panel {
     }
   }
 
-  component ActionButton: Rectangle {
-    id: action
-    property string text: ""
-    property string glyph: ""
+  component ActionButton: Ui.Button {
+    property alias glyph: action.iconText
     property bool destructive: false
-    signal clicked()
-
-    implicitHeight: Style.space(42)
-    radius: Style.space(10)
-    color: actionMouse.containsMouse
-      ? Style.selectedFillFor(root.foreground, Color.accent)
-      : root.faint
-    opacity: enabled ? 1.0 : 0.4
-
-    Row {
-      anchors.centerIn: parent
-      spacing: Style.space(7)
-      Text {
-        text: action.glyph
-        color: action.destructive ? "#fb7185" : root.accent
-        font.family: "JetBrainsMono Nerd Font"
-        font.pixelSize: Style.font.body
-      }
-      Text {
-        text: action.text
-        color: action.destructive ? "#fb7185" : root.foreground
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.body
-        font.bold: true
-      }
-    }
-    MouseArea {
-      id: actionMouse
-      anchors.fill: parent
-      hoverEnabled: true
-      enabled: action.enabled
-      onClicked: action.clicked()
-    }
+    id: action
+    foreground: destructive ? Color.accent : root.foreground
+    fontFamily: root.fontFamily
+    bordered: true
   }
 }

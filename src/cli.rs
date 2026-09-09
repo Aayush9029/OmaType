@@ -1083,6 +1083,15 @@ impl RecordAction {
 
 #[derive(Subcommand)]
 pub enum ConfigAction {
+    /// Read hotkey settings as JSON, or update them atomically with the supplied flags.
+    Hotkey {
+        #[arg(long)]
+        key: Option<String>,
+        #[arg(long, value_parser = ["hybrid", "toggle", "push_to_talk"])]
+        mode: Option<String>,
+        #[arg(long, action = clap::ArgAction::Set)]
+        enabled: Option<bool>,
+    },
     /// Modify a single configuration value in the on-disk config file
     ///
     /// Only `engine` is supported today. Comments and other fields are

@@ -220,7 +220,7 @@ fn run_setup_model(engine: &str, model: &str) -> Result<(), String> {
 /// to the General switch-outcome banner so the user sees it on next focus.
 fn restart_voxtype_daemon(app: &mut App) {
     let _ = std::process::Command::new("systemctl")
-        .args(["--user", "restart", "voxtype"])
+        .args(["--user", "restart", "omatype.service"])
         .status();
     app.refresh_inventory();
 }

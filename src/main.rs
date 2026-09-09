@@ -700,6 +700,30 @@ async fn main() -> anyhow::Result<()> {
 
         Commands::Config { action } => match action {
             None => show_config(&config).await?,
+            Some(ConfigAction::Hotkey { key, mode, enabled }) => {
+                if key.is_some() || mode.is_some() || enabled.is_some() {
+                    config_set::set_hotkey(
+                        resolve_config_path_for_write(cli.config.clone())?,
+                        key.as_deref(),
+                        mode.as_deref(),
+                        enabled,
+                    )?;
+                } else {
+                    let mut settings = serde_json::to_value(&config.hotkey)?;
+                    #[cfg(target_os = "linux")]
+                    {
+                        settings["keyboard_access"] =
+                            serde_json::json!(evdev::enumerate().any(|(_, device)| {
+                                device.supported_keys().is_some_and(|keys| {
+                                    keys.contains(evdev::Key::KEY_A)
+                                        && keys.contains(evdev::Key::KEY_Z)
+                                        && keys.contains(evdev::Key::KEY_ENTER)
+                                })
+                            }));
+                    }
+                    println!("{}", settings);
+                }
+            }
             Some(ConfigAction::Set { key }) => match key {
                 ConfigSetKey::Engine { name } => {
                     run_config_set_engine(cli.config.clone(), &name)?;

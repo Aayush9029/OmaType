@@ -118,11 +118,81 @@ pub fn set_engine(path: PathBuf, name: &str) -> Result<PathBuf, ConfigSetError> 
     Ok(editor.path().to_path_buf())
 }
 
+/// Update hotkey fields together, preserving the rest of the user's config.
+pub fn set_hotkey(
+    path: PathBuf,
+    key: Option<&str>,
+    mode: Option<&str>,
+    enabled: Option<bool>,
+) -> Result<(), EditorError> {
+    let mut editor = ConfigEditor::load_from_path(path)?;
+    if let Some(key) = key {
+        let key = key.trim().to_uppercase();
+        #[cfg(target_os = "linux")]
+        crate::hotkey::evdev_listener::parse_key_name(&key)
+            .map_err(|e| EditorError::Validate(e.to_string()))?;
+        if key.is_empty() {
+            return Err(EditorError::Validate("Hotkey cannot be empty".into()));
+        }
+        editor.set_string("hotkey", "key", &key);
+    }
+    if let Some(mode) = mode {
+        if !["hybrid", "toggle", "push_to_talk"].contains(&mode) {
+            return Err(EditorError::Validate(format!(
+                "Unknown hotkey mode: {mode}"
+            )));
+        }
+        editor.set_string("hotkey", "mode", mode);
+    }
+    if let Some(enabled) = enabled {
+        editor.set_bool("hotkey", "enabled", enabled);
+    }
+    editor.save()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
     use std::io::Write;
+
+    #[test]
+    fn hotkey_update_preserves_other_settings_and_comments() {
+        let base = crate::config::default_config_content();
+        let (_dir, path) = temp_config(&base);
+        set_hotkey(path.clone(), Some("rightctrl"), Some("hybrid"), Some(true)).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        let before: toml::Value = toml::from_str(&base).unwrap();
+        let after: toml::Value = toml::from_str(&text).unwrap();
+        assert_eq!(after["hotkey"]["key"].as_str(), Some("RIGHTCTRL"));
+        assert_eq!(after["hotkey"]["mode"].as_str(), Some("hybrid"));
+        for (name, value) in before.as_table().unwrap() {
+            if name != "hotkey" {
+                assert_eq!(&after[name], value);
+            }
+        }
+        for comment in base
+            .lines()
+            .filter(|line| line.trim_start().starts_with('#'))
+        {
+            assert!(text.contains(comment), "Lost comment: {comment}");
+        }
+        set_hotkey(path.clone(), None, Some("toggle"), None).unwrap();
+        let after: toml::Value = toml::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(after["hotkey"]["key"].as_str(), Some("RIGHTCTRL"));
+        assert_eq!(after["hotkey"]["mode"].as_str(), Some("toggle"));
+    }
+
+    #[test]
+    fn invalid_hotkey_update_leaves_file_unchanged() {
+        let base = crate::config::default_config_content();
+        let (_dir, path) = temp_config(&base);
+        assert!(set_hotkey(path.clone(), Some("F14"), Some("bad-mode"), None).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), base);
+        #[cfg(target_os = "linux")]
+        assert!(set_hotkey(path.clone(), Some("NOT_A_KEY"), Some("toggle"), None).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), base);
+    }
 
     fn temp_config(contents: &str) -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();

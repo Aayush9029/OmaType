@@ -42,6 +42,7 @@ pub struct TextEdit {
 pub enum Mode {
     PushToTalk,
     Toggle,
+    Hybrid,
 }
 
 #[derive(Debug, Clone)]
@@ -120,6 +121,7 @@ impl HotkeyState {
                 .unwrap_or_else(|| "HOME".to_string()),
             mode: match ed.get_string("hotkey", "mode").as_deref() {
                 Some("toggle") => Mode::Toggle,
+                Some("hybrid") => Mode::Hybrid,
                 _ => Mode::PushToTalk,
             },
             enabled: ed.get_bool("hotkey", "enabled").unwrap_or(true),
@@ -150,6 +152,7 @@ impl HotkeyState {
             match self.mode {
                 Mode::PushToTalk => "push_to_talk",
                 Mode::Toggle => "toggle",
+                Mode::Hybrid => "hybrid",
             },
         );
         ed.set_bool("hotkey", "enabled", self.enabled);
@@ -164,10 +167,16 @@ impl HotkeyState {
 
         match ed.save() {
             Ok(()) => {
+                let restart = std::process::Command::new("systemctl")
+                    .args(["--user", "restart", "omatype.service"])
+                    .output();
                 self.dirty_since_load = false;
                 self.feedback = Some(Feedback {
                     level: FeedbackLevel::Ok,
-                    message: format!("Saved to {}", ed.path().display()),
+                    message: match restart {
+                        Ok(output) if output.status.success() => "Saved and applied".into(),
+                        _ => "Saved; restart OmaType to apply the hotkey".into(),
+                    },
                 });
             }
             Err(e) => {
@@ -274,8 +283,12 @@ impl HotkeyState {
             }
             Field::Mode => {
                 self.mode = match self.mode {
+                    Mode::PushToTalk if delta < 0 => Mode::Hybrid,
                     Mode::PushToTalk => Mode::Toggle,
-                    Mode::Toggle => Mode::PushToTalk,
+                    Mode::Toggle if delta < 0 => Mode::PushToTalk,
+                    Mode::Toggle => Mode::Hybrid,
+                    Mode::Hybrid if delta < 0 => Mode::Toggle,
+                    Mode::Hybrid => Mode::PushToTalk,
                 };
             }
             Field::CancelKey => {
@@ -364,6 +377,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
             match state.mode {
                 Mode::PushToTalk => "Push-to-talk (hold)",
                 Mode::Toggle => "Toggle (press to start/stop)",
+                Mode::Hybrid => "Hybrid (tap to toggle, hold for live)",
             },
         )
         .dimmed(greyout),
