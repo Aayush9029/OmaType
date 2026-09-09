@@ -1083,8 +1083,14 @@ impl RecordAction {
 
 #[derive(Subcommand)]
 pub enum ConfigAction {
+    /// Listen for a shortcut key without triggering dictation (JSON lines, 15s timeout).
+    #[cfg(target_os = "linux")]
+    CaptureHotkey,
     /// Read hotkey settings as JSON, or update them atomically with the supplied flags.
     Hotkey {
+        /// Audio input device; omitted fields are preserved.
+        #[arg(long)]
+        audio_device: Option<String>,
         #[arg(long)]
         key: Option<String>,
         #[arg(long, value_parser = ["hybrid", "toggle", "push_to_talk"])]

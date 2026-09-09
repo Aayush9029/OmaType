@@ -24,91 +24,134 @@ Panel {
   property string pendingModel: ""
   property string modelError: ""
   property bool showingSettings: false
-  property var hotkey: ({ key: "", mode: "hybrid", enabled: true, keyboard_access: true })
-  property string draftMode: "hybrid"
-  property bool draftEnabled: true
-  property string settingsMessage: ""
-  property bool settingsFailed: false
-  property bool hotkeyLoaded: false
-  readonly property bool settingsBusy: saveHotkeyProc.running || applyHotkeyProc.running
-  readonly property string hotkeyLabel: String(hotkey.key || "hotkey")
+  readonly property var hotkey: Object.assign({}, preferences.details, preferences.saved)
+  readonly property string draftMode: preferences.values.mode
+  readonly property bool draftEnabled: preferences.values.enabled
+  readonly property string draftKey: preferences.values.key
+  readonly property string draftDevice: preferences.values.audio_device
+  readonly property var inputDevices: {
+    var devices = [{value: "default", label: "System default"}].concat(preferences.details.input_devices || [])
+    if (!devices.some(function(d) { return d.value === root.draftDevice }))
+      devices.push({value: root.draftDevice, label: root.draftDevice + " (configured)"})
+    return devices
+  }
+  SettingsStore {
+    id: preferences
+    command: String(root.settings.command || "omatype")
+    blocked: root.busy || root.serviceBusy || root.capturing
+    serviceOn: root.ready
+    onApplied: root.refreshStatus()
+  }
+  property bool captureReady: false
+  property string capturedKey: ""
+  property bool captureCancelled: false
+  property bool captureActive: false
+  property string captureError: ""
+  readonly property bool capturing: captureActive
+  readonly property bool serviceBusy: serviceProc.running
 
-  function refreshHotkey() {
-    if (hotkeyProc.running) return
-    hotkeyProc.command = commandFor(["config", "hotkey"])
-    hotkeyProc.running = true
+  function toggleService() {
+    if (serviceBusy || settingsBusy || capturing) return
+    lastError = ""
+    serviceProc.command = ["systemctl", "--user", ready ? "stop" : "start", "omatype.service"]
+    serviceProc.running = true
   }
 
+  function captureKey() {
+    if (busy || capturing || serviceBusy || preferences.phase === "applying" || !hotkeyLoaded) return
+    preferences.message = ""
+    preferences.failed = false
+    captureReady = false
+    capturedKey = ""
+    captureCancelled = false
+    captureActive = true
+    captureError = ""
+    captureProc.command = commandFor(["config", "capture-hotkey"])
+    captureProc.running = true
+    hotkeyButton.forceActiveFocus()
+  }
+
+  function cancelCapture() {
+    if (!captureActive || captureCancelled) return
+    captureCancelled = true
+    captureProc.signal(15)
+    captureStopTimeout.restart()
+    captureReady = false
+  }
+
+  Process {
+    id: captureProc
+    stdout: SplitParser {
+      onRead: function(line) {
+        try {
+          var result = JSON.parse(line)
+          if (root.captureCancelled) return
+          if (result.listening) root.captureReady = true
+          if (result.key) {
+            root.capturedKey = result.key
+          }
+          if (result.cancelled) preferences.message = "Shortcut unchanged"
+        } catch (error) { }
+      }
+    }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.captureError = text.trim()
+    }
+    onExited: function(code) {
+      captureStopTimeout.stop()
+      root.captureReady = false
+      root.captureActive = false
+      if (root.captureCancelled) {
+        preferences.message = "Shortcut unchanged"
+      } else if (code === 0 && root.capturedKey) {
+        preferences.edit("key", root.capturedKey)
+      } else if (code !== 0) {
+        preferences.failed = true
+        preferences.message = root.captureError || "Capture timed out. Click the shortcut to try again."
+      }
+    }
+  }
+
+  Process {
+    id: serviceProc
+    stderr: StdioCollector { onStreamFinished: if (text.trim()) root.lastError = text.trim() }
+    onExited: function(code) {
+      if (code !== 0 && !root.lastError) root.lastError = "Could not change OmaType's power state"
+      root.refreshStatus()
+    }
+  }
+  readonly property string settingsMessage: preferences.message
+  readonly property bool settingsFailed: preferences.failed
+  readonly property bool hotkeyLoaded: preferences.loaded
+  readonly property bool settingsBusy: preferences.busy
+  readonly property string hotkeyLabel: String(hotkey.key === "F13" && hotkey.home_is_f13 ? "Home" : (hotkey.key || "shortcut"))
+
+  function refreshHotkey() { preferences.refresh() }
   function openSettings() {
     open()
     showingModels = false
     showingSettings = true
-    settingsMessage = ""
-    settingsFailed = false
     refreshHotkey()
-    Qt.callLater(function() { hotkeyField.forceActiveFocus() })
+    Qt.callLater(function() { hotkeyButton.forceActiveFocus() })
   }
-
-  function saveHotkey() {
-    if (busy || settingsBusy || !hotkeyLoaded) return
-    settingsMessage = ""
-    settingsFailed = false
-    saveHotkeyProc.command = commandFor(["config", "hotkey", "--key", hotkeyField.text.trim(),
-      "--mode", draftMode, "--enabled", String(draftEnabled)])
-    saveHotkeyProc.running = true
-  }
-
-  Process {
-    id: hotkeyProc
-    stdout: StdioCollector {
-      onStreamFinished: {
-        try {
-          root.hotkey = JSON.parse(text)
-          hotkeyField.text = root.hotkey.key
-          root.draftMode = root.hotkey.mode
-          root.draftEnabled = root.hotkey.enabled
-          root.hotkeyLoaded = true
-        } catch (error) {
-          root.settingsFailed = true
-          root.settingsMessage = "Could not read hotkey settings"
-        }
-      }
-    }
-    onExited: function(code) {
-      if (code !== 0) {
-        root.hotkeyLoaded = false
-        root.settingsFailed = true
-        root.settingsMessage = "Could not read hotkey settings. Update the OmaType binary."
+  Timer {
+    interval: 17000
+    running: root.capturing
+    onTriggered: {
+      if (captureProc.running) captureProc.signal(9)
+      else {
+        root.captureActive = false
+        preferences.failed = true
+        preferences.message = "Could not start shortcut capture. Click the shortcut to retry."
       }
     }
   }
-
-  Process {
-    id: saveHotkeyProc
-    stderr: StdioCollector {
-      onStreamFinished: if (text.trim()) root.settingsMessage = text.trim()
-    }
-    onExited: function(code) {
-      if (code !== 0) {
-        root.settingsFailed = true
-        if (!root.settingsMessage) root.settingsMessage = "Could not save settings"
-        return
-      }
-      root.refreshHotkey()
-      applyHotkeyProc.running = true
-    }
+  Timer {
+    id: captureStopTimeout
+    interval: 300
+    onTriggered: captureProc.signal(9)
   }
-
-  Process {
-    id: applyHotkeyProc
-    command: ["systemctl", "--user", "restart", "omatype.service"]
-    onExited: function(code) {
-      root.settingsFailed = code !== 0
-      root.settingsMessage = code === 0 ? "Saved and applied" : "Saved, but OmaType could not restart"
-      root.refreshStatus()
-    }
-  }
-
 
   readonly property var modelOptions: [
     {
@@ -165,7 +208,7 @@ Panel {
   }
 
   function toggleRecording() {
-    if (working) return
+    if (working || !ready || capturing || serviceBusy || settingsBusy) return
     runAction(["record", "toggle"])
   }
 
@@ -204,23 +247,25 @@ Panel {
   }
 
   function stateTitle() {
-    if (lastError !== "") return "OmaType unavailable"
-    if (state === "recording") return "Recording"
-    if (state === "streaming") return "Typing live"
-    if (state === "transcribing") return "Finishing transcript"
-    if (state === "idle") return "Ready"
-    return "Daemon stopped"
+    if (serviceBusy) return ready ? "Turning off" : "Starting up"
+    if (lastError !== "") return "Needs attention"
+    if (!ready) return "Dictation off"
+    if (working) return "Finishing transcript"
+    if (recording) {
+      var held = hotkey.mode === "push_to_talk" || (hotkey.mode === "hybrid" && state === "streaming")
+      return (held ? "Release " : "Tap ") + hotkeyLabel + " to finish"
+    }
+    if (!hotkey.enabled) return "Shortcut disabled"
+    if (hotkey.keyboard_access === false) return "Keyboard access needed"
+    return "Ready to dictate"
   }
 
   function stateDetail() {
     if (lastError !== "") return lastError
-    if (recording) return state === "streaming" || hotkey.mode === "push_to_talk" ? "Release " + hotkeyLabel + " to finish" : "Tap " + hotkeyLabel + " again to finish"
-    if (working) return "OmaType is processing the complete recording"
-    var model = String(status.model || "")
     for (var i = 0; i < modelOptions.length; i++) {
-      if (modelIsActive(modelOptions[i])) return modelOptions[i].title + " · " + modelOptions[i].languages
+      if (modelIsActive(modelOptions[i])) return modelOptions[i].title
     }
-    return model !== "" ? model : "Press " + hotkeyLabel + " to dictate"
+    return String(status.model || "")
   }
 
   function durationText(seconds) {
@@ -271,7 +316,10 @@ Panel {
     refreshHotkey()
   }
 
-  onOpenedChanged: if (opened) {
+  onShowingSettingsChanged: if (!showingSettings) cancelCapture()
+  onOpenedChanged: if (!opened) {
+    cancelCapture()
+  } else {
     cursorActive = false
     selectedEntry = 0
     pendingDeleteId = ""
@@ -436,9 +484,16 @@ Panel {
         Qt.callLater(function() { root.revealSelectedEntry() })
       }
       onActivateRequested: if (!root.showingModels && root.historyEntries.length > 0) root.copyEntry(root.historyEntries[root.selectedEntry])
-      onCloseRequested: root.close()
+      onCloseRequested: {
+        if (root.showingSettings || root.showingModels) {
+          root.showingSettings = false
+          root.showingModels = false
+          keyCatcher.forceActiveFocus()
+        } else root.close()
+      }
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(text) {
+        if (text === "o" || text === "O") { root.toggleService(); return }
         if (text === "s" || text === "S") { root.openSettings(); return }
         if (root.showingModels) return
         if ((text === "d" || text === "D") && root.historyEntries.length > 0)
@@ -456,23 +511,33 @@ Panel {
         PanelHero {
           width: parent.width
           title: "OmaType"
-          meta: root.showingSettings ? "SETTINGS" : root.stateTitle()
+          meta: root.showingSettings ? "SETTINGS" : root.showingModels ? "MODELS" : root.stateTitle()
           foreground: root.foreground
           fontFamily: root.fontFamily
           iconOpacity: root.ready ? 1.0 : 0.45
           trailingControl: Component {
-            PanelActionButton {
-              iconText: root.showingSettings || root.showingModels ? "󰁍" : "󰒓"
-              tooltipText: root.showingSettings || root.showingModels ? "Back to transcripts" : "Settings"
-              foreground: root.foreground
-              fontFamily: root.fontFamily
-              focusable: root.showingSettings
-              onClicked: {
-                if (root.showingSettings || root.showingModels) {
-                  root.showingSettings = false
-                  root.showingModels = false
-                  keyCatcher.forceActiveFocus()
-                } else root.openSettings()
+            Row {
+              spacing: Style.space(8)
+              PanelActionButton {
+                visible: root.showingSettings || root.showingModels
+                anchors.verticalCenter: parent.verticalCenter
+                iconText: "󰁍"
+                tooltipText: "Back to transcripts"
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                focusable: root.showingSettings
+                onClicked: { root.showingSettings = false; root.showingModels = false; keyCatcher.forceActiveFocus() }
+              }
+              ToggleSwitch {
+                checked: root.ready
+                busy: root.serviceBusy || root.settingsBusy || root.capturing
+                foreground: root.foreground
+                onToggled: root.toggleService()
+                PanelToolTip {
+                  visible: parent.containsMouse
+                  text: root.ready ? "Turn dictation off" : "Turn dictation on"
+                  fontFamily: root.fontFamily
+                }
               }
             }
           }
@@ -488,30 +553,15 @@ Panel {
 
         PanelSeparator { foreground: root.foreground }
 
-        Column {
-          visible: !root.showingSettings
+        Text {
+          visible: root.lastError !== "" && !root.showingSettings
           width: parent.width
-          spacing: Style.space(6)
-          Text {
-            width: parent.width
-            text: root.stateDetail()
-            textFormat: Text.PlainText
-            color: root.muted
-            elide: Text.ElideMiddle
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.body
-          }
-          Text {
-            width: parent.width
-            text: !root.hotkey.enabled ? "Keyboard shortcut disabled"
-              : root.hotkey.keyboard_access === false ? "Keyboard access needed · open Settings"
-              : root.hotkeyLabel + (root.hotkey.mode === "hybrid" ? "  ·  Tap to toggle / hold for live"
-                : root.hotkey.mode === "toggle" ? "  ·  Tap to start / stop" : "  ·  Hold to record")
-            color: root.muted
-            wrapMode: Text.Wrap
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-          }
+          text: root.lastError
+          textFormat: Text.PlainText
+          color: root.muted
+          wrapMode: Text.Wrap
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
         }
 
         Column {
@@ -519,7 +569,7 @@ Panel {
           visible: root.showingSettings
           width: parent.width
           spacing: Style.space(14)
-          Keys.onEscapePressed: { root.showingSettings = false; keyCatcher.forceActiveFocus() }
+          Keys.onEscapePressed: { if (root.capturing) root.cancelCapture(); else { root.showingSettings = false; keyCatcher.forceActiveFocus() } }
 
           RowLayout {
             width: parent.width
@@ -532,22 +582,33 @@ Panel {
             ToggleSwitch {
               checked: root.draftEnabled
               foreground: root.foreground
-              enabled: !root.settingsBusy && root.hotkeyLoaded
-              onToggled: root.draftEnabled = !root.draftEnabled
+              enabled: !root.busy && !root.serviceBusy && !root.capturing && root.hotkeyLoaded
+              onToggled: preferences.edit("enabled", !root.draftEnabled)
             }
           }
-          Ui.TextField {
-            id: hotkeyField
+          Ui.Button {
+            id: hotkeyButton
             width: parent.width
-            placeholderText: "F13, HOME, RIGHTCTRL…"
+            text: root.capturing ? (root.captureCancelled ? "Cancelling…" : (root.captureReady ? "Press a key…" : "Getting ready…"))
+              : (root.draftKey === "F13" && root.hotkey.home_is_f13 ? "Home" : root.draftKey)
+            iconText: "󰌌"
             foreground: root.foreground
-            enabled: !root.settingsBusy && root.hotkeyLoaded
-            selectByMouse: true
-            onAccepted: root.saveHotkey()
+            fontFamily: root.fontFamily
+            bordered: true
+            focusable: true
+            enabled: !root.busy && preferences.phase !== "applying" && !root.serviceBusy && root.hotkeyLoaded
+            selected: root.capturing
+            onClicked: root.capturing ? root.cancelCapture() : root.captureKey()
+            Keys.priority: Keys.BeforeItem
+            Keys.onPressed: function(event) {
+              // The capture process reads the key; keep it from activating UI controls.
+              if (root.capturing) event.accepted = true
+            }
           }
           Text {
             width: parent.width
-            text: "Enter the key name. If Home is remapped to F13 in keyd, use F13 here."
+            text: root.capturing ? "Press and release your shortcut. Esc cancels."
+              : "Click the shortcut, then press the key you want to use."
             wrapMode: Text.Wrap
             color: root.muted
             font.family: root.fontFamily
@@ -578,10 +639,27 @@ Panel {
                 foreground: root.foreground
                 fontFamily: root.fontFamily
                 focusable: true
-                enabled: !root.settingsBusy && root.hotkeyLoaded
-                onClicked: root.draftMode = modelData.value
+                enabled: !root.busy && !root.serviceBusy && !root.capturing && root.hotkeyLoaded
+                onClicked: preferences.edit("mode", modelData.value)
               }
             }
+          }
+          PanelSeparator { foreground: root.foreground }
+          PanelSectionHeader {
+            text: "MICROPHONE"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+          }
+          Ui.Dropdown {
+            id: microphonePicker
+            width: parent.width
+            showLabel: false
+            value: root.draftDevice
+            options: root.inputDevices
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            enabled: !root.busy && !root.serviceBusy && !root.capturing && root.hotkeyLoaded
+            onChanged: function(value) { preferences.edit("audio_device", value) }
           }
           Text {
             visible: root.hotkey.keyboard_access === false
@@ -593,26 +671,21 @@ Panel {
             font.pixelSize: Style.font.caption
           }
           PanelSeparator { foreground: root.foreground }
-          Ui.Button {
-            width: parent.width
-            text: root.settingsBusy ? "Applying…" : "Save and apply"
-            iconText: "󰄬"
-            bordered: true
-            focusable: true
-            foreground: root.foreground
-            fontFamily: root.fontFamily
-            enabled: !root.busy && !root.settingsBusy && root.hotkeyLoaded && hotkeyField.text.trim() !== ""
-            onClicked: root.saveHotkey()
-          }
           Text {
-            visible: root.settingsMessage !== "" || root.busy
+            visible: true
             width: parent.width
-            text: root.busy ? "Finish recording before applying settings." : root.settingsMessage
+            text: root.busy ? "Finish recording to change settings." : (root.settingsMessage || "Changes save and apply automatically.")
             textFormat: Text.PlainText
             wrapMode: Text.Wrap
             color: root.settingsFailed ? Color.accent : root.muted
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
+          }
+          Ui.Button {
+            visible: preferences.failed
+            text: "Retry"
+            foreground: root.foreground
+            onClicked: preferences.retry()
           }
           Ui.Button {
             width: parent.width
@@ -625,8 +698,6 @@ Panel {
             onClicked: { Quickshell.execDetached(["omarchy", "launch", "terminal"].concat(root.commandFor(["configure"]))); root.close() }
           }
         }
-
-        PanelSeparator { visible: !root.showingSettings; foreground: root.foreground }
 
         RowLayout {
           visible: !root.showingSettings && !root.showingModels
@@ -782,7 +853,7 @@ Panel {
             Layout.fillWidth: true
             text: root.recording ? "Stop recording" : "Start recording"
             glyph: root.recording ? "󰓛" : "󰐊"
-            enabled: root.ready && !root.working && !actionProc.running
+            enabled: root.ready && !root.working && !root.serviceBusy && !root.settingsBusy && !actionProc.running
             destructive: root.recording
             onClicked: root.toggleRecording()
           }
@@ -810,11 +881,6 @@ Panel {
               font.bold: true
             }
             Item { Layout.fillWidth: true }
-            MiniButton {
-              glyph: "󰁍"
-              tooltip: "Back to transcripts"
-              onClicked: root.showingModels = false
-            }
           }
 
           Repeater {
@@ -839,23 +905,12 @@ Panel {
           }
         }
 
-        Ui.Button {
-          visible: !root.showingModels && !root.showingSettings
-          width: parent.width
-          text: "Settings"
-          iconText: "󰒓"
-          foreground: root.foreground
-          fontFamily: root.fontFamily
-          leftAlign: true
-          onClicked: root.openSettings()
-        }
-
         Text {
           visible: !root.showingSettings
           width: parent.width
           text: root.showingModels
             ? "Models download locally · switching restarts OmaType"
-            : "Enter copies  ·  S settings  ·  Esc closes"
+            : "S settings  ·  O on / off  ·  Esc closes"
           color: root.muted
           horizontalAlignment: Text.AlignHCenter
           font.family: root.fontFamily

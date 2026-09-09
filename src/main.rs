@@ -700,13 +700,26 @@ async fn main() -> anyhow::Result<()> {
 
         Commands::Config { action } => match action {
             None => show_config(&config).await?,
-            Some(ConfigAction::Hotkey { key, mode, enabled }) => {
-                if key.is_some() || mode.is_some() || enabled.is_some() {
-                    config_set::set_hotkey(
+            #[cfg(target_os = "linux")]
+            Some(ConfigAction::CaptureHotkey) => {
+                // Capture stdout is a JSON-lines protocol, never a tracing sink.
+                let _quiet =
+                    tracing::subscriber::set_default(tracing::subscriber::NoSubscriber::default());
+                voxtype::hotkey::evdev_listener::capture_key()?;
+            }
+            Some(ConfigAction::Hotkey {
+                key,
+                mode,
+                enabled,
+                audio_device,
+            }) => {
+                if key.is_some() || mode.is_some() || enabled.is_some() || audio_device.is_some() {
+                    config_set::set_preferences(
                         resolve_config_path_for_write(cli.config.clone())?,
                         key.as_deref(),
                         mode.as_deref(),
                         enabled,
+                        audio_device.as_deref(),
                     )?;
                 } else {
                     let mut settings = serde_json::to_value(&config.hotkey)?;
@@ -720,6 +733,21 @@ async fn main() -> anyhow::Result<()> {
                                         && keys.contains(evdev::Key::KEY_ENTER)
                                 })
                             }));
+                    }
+                    settings["audio_device"] = serde_json::json!(config.audio.device);
+                    settings["input_devices"] = config_set::input_device_options();
+                    #[cfg(target_os = "linux")]
+                    {
+                        settings["home_is_f13"] =
+                            serde_json::json!(std::fs::read_to_string("/etc/keyd/default.conf")
+                                .map(|text| text.lines().any(|line| line
+                                    .split('#')
+                                    .next()
+                                    .unwrap_or("")
+                                    .split_whitespace()
+                                    .collect::<String>()
+                                    == "home=f13"))
+                                .unwrap_or(false));
                     }
                     println!("{}", settings);
                 }

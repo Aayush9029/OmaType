@@ -125,6 +125,17 @@ pub fn set_hotkey(
     mode: Option<&str>,
     enabled: Option<bool>,
 ) -> Result<(), EditorError> {
+    set_preferences(path, key, mode, enabled, None)
+}
+
+/// Save the quick settings as one validated, atomic change.
+pub fn set_preferences(
+    path: PathBuf,
+    key: Option<&str>,
+    mode: Option<&str>,
+    enabled: Option<bool>,
+    audio_device: Option<&str>,
+) -> Result<(), EditorError> {
     let mut editor = ConfigEditor::load_from_path(path)?;
     if let Some(key) = key {
         let key = key.trim().to_uppercase();
@@ -147,7 +158,90 @@ pub fn set_hotkey(
     if let Some(enabled) = enabled {
         editor.set_bool("hotkey", "enabled", enabled);
     }
+    if let Some(device) = audio_device {
+        if device.trim().is_empty() {
+            return Err(EditorError::Validate("Microphone cannot be empty".into()));
+        }
+        editor.set_string("audio", "device", device);
+    }
     editor.save()
+}
+
+/// List Linux capture cards from kernel metadata without opening audio hardware.
+/// CPAL's input_devices() probes PCM streams and can stall for seconds or
+/// contend with an active dictation stream, so it must not run on settings reads.
+#[cfg(target_os = "linux")]
+pub fn input_device_options() -> serde_json::Value {
+    let cards = std::fs::read_to_string("/proc/asound/cards").unwrap_or_default();
+    let pcm = std::fs::read_to_string("/proc/asound/pcm").unwrap_or_default();
+    alsa_input_options(&cards, &pcm)
+}
+
+#[cfg(target_os = "linux")]
+fn alsa_input_options(cards: &str, pcm: &str) -> serde_json::Value {
+    let mut options = Vec::new();
+    for line in cards.lines() {
+        let Some((index, rest)) = line.split_once('[') else {
+            continue;
+        };
+        let Ok(index) = index.trim().parse::<u32>() else {
+            continue;
+        };
+        let Some((id, _)) = rest.split_once(']') else {
+            continue;
+        };
+        let has_capture = pcm.lines().any(|line| {
+            let Some((card, _)) = line.split_once('-') else {
+                return false;
+            };
+            card.trim().parse::<u32>().ok() == Some(index)
+                && line.split(':').any(|part| {
+                    part.trim()
+                        .strip_prefix("capture ")
+                        .and_then(|count| count.trim().parse::<u32>().ok())
+                        .is_some_and(|count| count > 0)
+                })
+        });
+        if has_capture {
+            let name = format!("sysdefault:CARD={}", id.trim());
+            options
+                .push(serde_json::json!({"value": name, "label": microphone_label(&name, cards)}));
+        }
+    }
+    serde_json::json!(options)
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn input_device_options() -> serde_json::Value {
+    use cpal::traits::{DeviceTrait, HostTrait};
+    let host = cpal::default_host();
+    let mut options = Vec::new();
+    if let Ok(devices) = host.input_devices() {
+        for device in devices {
+            if let Ok(name) = device.name() {
+                options.push(serde_json::json!({"value": name, "label": name}));
+            }
+        }
+    }
+    serde_json::json!(options)
+}
+
+fn microphone_label(name: &str, cards: &str) -> String {
+    if let Some(card) = name.strip_prefix("sysdefault:CARD=") {
+        for line in cards.lines() {
+            if let Some((_, rest)) = line.split_once('[') {
+                if let Some((id, rest)) = rest.split_once(']') {
+                    if id.trim() == card {
+                        if let Some((_, label)) = rest.split_once(" - ") {
+                            return label.trim().to_string();
+                        }
+                    }
+                }
+            }
+        }
+        return card.to_string();
+    }
+    name.to_string()
 }
 
 #[cfg(test)]
@@ -155,6 +249,51 @@ mod tests {
     use super::*;
     use std::fs;
     use std::io::Write;
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn capture_options_skip_playback_only_and_duplicate_pcm_entries() {
+        let cards = " 0 [HDMI ]: HDA - HDMI Output\n 1 [Mic ]: USB - USB Microphone\n 2 [Gone ]: USB - No Capture";
+        let pcm = "00-00: HDMI : playback 1\n01-00: Mic : playback 1 : capture 1\n01-01: Mic : capture 1\n02-00: Gone : capture 0";
+        assert_eq!(
+            alsa_input_options(cards, pcm),
+            serde_json::json!([
+                {"value": "sysdefault:CARD=Mic", "label": "USB Microphone"}
+            ])
+        );
+        assert_eq!(alsa_input_options("", ""), serde_json::json!([]));
+    }
+
+    #[test]
+    fn microphone_and_hotkey_save_together_or_not_at_all() {
+        let base = crate::config::default_config_content();
+        let (_dir, path) = temp_config(&base);
+        assert!(
+            set_preferences(path.clone(), Some("F14"), Some("toggle"), None, Some(" ")).is_err()
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), base);
+        set_preferences(
+            path.clone(),
+            Some("F14"),
+            Some("toggle"),
+            None,
+            Some("sysdefault:CARD=XDR"),
+        )
+        .unwrap();
+        let saved: toml::Value = toml::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(
+            saved["audio"]["device"].as_str(),
+            Some("sysdefault:CARD=XDR")
+        );
+        assert_eq!(saved["hotkey"]["key"].as_str(), Some("F14"));
+        assert_eq!(
+            microphone_label(
+                "sysdefault:CARD=XDR",
+                " 3 [XDR   ]: USB-Audio - Studio Display XDR\n"
+            ),
+            "Studio Display XDR"
+        );
+    }
 
     #[test]
     fn hotkey_update_preserves_other_settings_and_comments() {

@@ -396,6 +396,55 @@ impl DeviceManager {
     }
 }
 
+/// Capture one released key through the same input path used by dictation.
+/// JSON lines let the UI distinguish ready, captured, and cancelled states.
+pub fn capture_key() -> anyhow::Result<()> {
+    use std::io::Write;
+    let _guard = super::capture::inhibit()?;
+    let mut manager = DeviceManager::new()?;
+    anyhow::ensure!(manager.has_devices(), "Keyboard access is unavailable");
+    // Read remapped keys when keyd is present, rather than racing its physical inputs.
+    if manager
+        .devices
+        .values()
+        .any(|d| d.name() == Some("keyd virtual keyboard"))
+    {
+        manager
+            .devices
+            .retain(|_, d| d.name() == Some("keyd virtual keyboard"));
+    }
+    println!("{}", serde_json::json!({"listening": true}));
+    std::io::stdout().flush()?;
+    let started = Instant::now();
+    let mut pressed = None;
+    while started.elapsed() < Duration::from_secs(15) {
+        for (key, value) in manager.poll_events() {
+            if value == 1 && pressed.is_none() {
+                pressed = Some(key);
+            } else if value == 0 && pressed == Some(key) {
+                // Drain the daemon's queued press/release before relinquishing the lock.
+                std::thread::sleep(Duration::from_millis(150));
+                if key == Key::KEY_ESC {
+                    println!("{}", serde_json::json!({"cancelled": true}));
+                } else {
+                    let full_name = format!("{:?}", key);
+                    let short = full_name.trim_start_matches("KEY_");
+                    let name = if short.parse::<u16>().is_ok() {
+                        full_name
+                    } else {
+                        short.to_string()
+                    };
+                    parse_key_name(&name)?;
+                    println!("{}", serde_json::json!({"key": name}));
+                }
+                return Ok(());
+            }
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    anyhow::bail!("No key pressed. Click the shortcut to try again.")
+}
+
 /// Main listener loop running in a blocking task
 #[allow(clippy::too_many_arguments)]
 fn evdev_listener_loop(
@@ -495,8 +544,19 @@ fn evdev_listener_loop(
             continue;
         }
 
-        // Poll all devices for events
-        for (key, value) in manager.poll_events() {
+        // Discard captured keys before they enter the daemon's event queue.
+        // Filtering only in the daemon lets queued keys fire after capture ends.
+        let events = manager.poll_events();
+        if super::capture::active() {
+            active_modifiers.clear();
+            model_modifier_held = false;
+            held_profile_modifiers.clear();
+            last_pressed_profile = None;
+            is_pressed = false;
+            std::thread::sleep(Duration::from_millis(5));
+            continue;
+        }
+        for (key, value) in events {
             // Track modifier state
             if modifier_keys.contains(&key) {
                 match value {
@@ -720,8 +780,12 @@ pub(crate) fn parse_key_name(name: &str) -> Result<Key, HotkeyError> {
         "KEY_FASTFORWARD" => Key::KEY_FASTFORWARD,
         "KEY_MEDIA" => Key::KEY_MEDIA,
 
-        // If not found, return error with suggestions
+        // Accept the remaining standard evdev names (letters, keypad, etc.)
+        // so every captured keyboard key can be saved without numeric codes.
         _ => {
+            if let Ok(key) = key_name.parse::<Key>() {
+                return Ok(key);
+            }
             return Err(HotkeyError::UnknownKey(format!(
                 "{}. Try: SCROLLLOCK, PAUSE, MEDIA, F13-F24, or a prefixed keycode (e.g. EVTEST_226, WEV_234). Run 'evtest' to find key names",
                 name
@@ -797,6 +861,8 @@ mod tests {
 
     #[test]
     fn test_parse_key_name() {
+        assert_eq!(parse_key_name("A").unwrap(), Key::KEY_A);
+        assert_eq!(parse_key_name("KEY_1").unwrap(), Key::KEY_1);
         assert_eq!(parse_key_name("SCROLLLOCK").unwrap(), Key::KEY_SCROLLLOCK);
         assert_eq!(parse_key_name("ScrollLock").unwrap(), Key::KEY_SCROLLLOCK);
         assert_eq!(

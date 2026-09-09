@@ -153,6 +153,7 @@ install_plugin() {
   mkdir -p "$PLUGIN_DIR"
   install -m 0644 "$ROOT_DIR/contrib/omarchy/omatype/manifest.json" "$PLUGIN_DIR/manifest.json"
   install -m 0644 "$ROOT_DIR/contrib/omarchy/omatype/Panel.qml" "$PLUGIN_DIR/Panel.qml"
+  install -m 0644 "$ROOT_DIR/contrib/omarchy/omatype/SettingsStore.qml" "$PLUGIN_DIR/SettingsStore.qml"
   install -m 0644 "$ROOT_DIR/contrib/omarchy/omatype/FloatingCapsule.qml" "$PLUGIN_DIR/FloatingCapsule.qml"
   install -m 0644 "$ROOT_DIR/contrib/omarchy/omatype/service.qml" "$PLUGIN_DIR/service.qml"
   rm -f -- "$PLUGIN_DIR/Waveform.qml" "$PLUGIN_DIR/Service.qml"

@@ -2639,6 +2639,10 @@ impl Daemon {
                         None => std::future::pending().await,
                     }
                 } => {
+                    #[cfg(target_os = "linux")]
+                    if state.is_idle() && crate::hotkey::capture::active() {
+                        continue;
+                    }
                     match (hotkey_event, activation_mode) {
                         // === PUSH-TO-TALK MODE ===
                         (HotkeyEvent::Pressed { model_override, profile_override }, ActivationMode::PushToTalk) => {
