@@ -1,23 +1,30 @@
 {
   "schemaVersion": 1,
-  "id": "local.omatype",
+  "id": "io.github.aayush9029.omatype",
   "name": "OmaType",
   "version": "0.2.0",
   "author": "Aayush Pokharel",
   "license": "MIT",
   "description": "OmaType status, controls, and local transcript history in the Omarchy bar.",
-  "kinds": ["bar-widget", "service"],
+  "kinds": [
+    "bar-widget",
+    "service"
+  ],
   "keepLoaded": true,
   "activation": "on-demand",
   "entryPoints": {
-    "barWidget": "Panel.qml",
-    "service": "service.qml"
+    "barWidget": "contrib/omarchy/omatype/Panel.qml",
+    "service": "contrib/omarchy/omatype/service.qml"
   },
   "barWidget": {
     "displayName": "OmaType",
     "description": "Record, inspect status, and copy or delete recent local transcripts.",
     "category": "System",
-    "aliases": ["voice", "dictation", "transcription"],
+    "aliases": [
+      "voice",
+      "dictation",
+      "transcription"
+    ],
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {

@@ -9,8 +9,8 @@ import qs.Ui as Ui
 
 Panel {
   id: root
-  moduleName: "local.omatype"
-  ipcTarget: "local.omatype"
+  moduleName: "io.github.aayush9029.omatype"
+  ipcTarget: "io.github.aayush9029.omatype"
   manageIpc: false
 
   property var status: ({ alt: "stopped", engine: "", model: "", backend: "" })

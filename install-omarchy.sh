@@ -13,7 +13,9 @@ BIN_DIR="${XDG_BIN_HOME:-$HOME/.local/bin}"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/voxtype"
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/voxtype"
 MODEL_DIR="$DATA_DIR/models/parakeet-unified-en-0.6b-int8"
-PLUGIN_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins/local.omatype"
+PLUGIN_ID="io.github.aayush9029.omatype"
+PLUGINS_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins"
+PLUGIN_DIR="$PLUGINS_DIR/$PLUGIN_ID"
 SERVICE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 LEGACY_HOOK="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/hooks/post-update.d/install-voxtype.hook"
 MODEL_BASE_URL="https://huggingface.co/bobNight/parakeet-unified-en-0.6b-onnx/resolve/main"
@@ -150,17 +152,22 @@ install_plugin() {
     return
   fi
 
-  mkdir -p "$PLUGIN_DIR"
-  install -m 0644 "$ROOT_DIR/contrib/omarchy/omatype/manifest.json" "$PLUGIN_DIR/manifest.json"
-  install -m 0644 "$ROOT_DIR/contrib/omarchy/omatype/Panel.qml" "$PLUGIN_DIR/Panel.qml"
-  install -m 0644 "$ROOT_DIR/contrib/omarchy/omatype/SettingsStore.qml" "$PLUGIN_DIR/SettingsStore.qml"
-  install -m 0644 "$ROOT_DIR/contrib/omarchy/omatype/FloatingCapsule.qml" "$PLUGIN_DIR/FloatingCapsule.qml"
-  install -m 0644 "$ROOT_DIR/contrib/omarchy/omatype/service.qml" "$PLUGIN_DIR/service.qml"
-  rm -f -- "$PLUGIN_DIR/Waveform.qml" "$PLUGIN_DIR/Service.qml"
+  # Earlier versions installed the widget as local.omatype.
+  if [[ -d "$PLUGINS_DIR/local.omatype" ]]; then
+    omarchy plugin remove local.omatype --yes >/dev/null 2>&1 || rm -rf -- "$PLUGINS_DIR/local.omatype"
+  fi
+
+  local widget="contrib/omarchy/omatype"
+  rm -rf -- "$PLUGIN_DIR"
+  mkdir -p "$PLUGIN_DIR/$widget"
+  install -m 0644 "$ROOT_DIR/manifest.json" "$PLUGIN_DIR/manifest.json"
+  for file in Panel.qml SettingsStore.qml FloatingCapsule.qml service.qml; do
+    install -m 0644 "$ROOT_DIR/$widget/$file" "$PLUGIN_DIR/$widget/$file"
+  done
   omarchy plugin validate "$PLUGIN_DIR"
   omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
-  omarchy plugin enable local.omatype --before omarchy.bluetooth >/dev/null 2>&1 \
-    || omarchy bar put local.omatype --before omarchy.bluetooth
+  omarchy plugin enable "$PLUGIN_ID" --before omarchy.bluetooth >/dev/null 2>&1 \
+    || omarchy bar put "$PLUGIN_ID" --before omarchy.bluetooth
   print_success "Added OmaType to the Omarchy bar"
 }
 
